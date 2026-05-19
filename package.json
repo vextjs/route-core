@@ -1,0 +1,22 @@
+{
+  "name": "rutex",
+  "version": "0.0.1",
+  "description": "Ultra‑fast, minimal routing engine for Node.js. Built for hot paths.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [],
+  "author": "Rocky",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vextjs/rutex.git"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ]
+}
+
