@@ -1,10 +1,28 @@
 {
   "name": "route-core",
   "version": "0.0.1",
+  "private": true,
   "description": "Ultra‑fast, minimal routing engine for Node.js. Built for hot paths.",
-  "main": "index.js",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
   "scripts": {
-    "test": "echo \"No tests yet\" && exit 0"
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node scripts/finalize-build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/router.test.mjs test/package-entry.test.mjs",
+    "test:shared": "npm run build && node --test test/router.test.mjs",
+    "test:router": "npm run build && node --test test/router.test.mjs",
+    "test:package": "npm run build && node --test test/package-entry.test.mjs",
+    "bench": "npm run build && node benchmark/route-only/index.mjs",
+    "prepublishOnly": "node scripts/prepublish-check.mjs"
   },
   "keywords": [],
   "author": "Rocky",
@@ -14,9 +32,12 @@
     "url": "https://github.com/vextjs/rutex.git"
   },
   "files": [
-    "index.js",
+    "dist",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "devDependencies": {
+    "find-my-way": "^9.6.0",
+    "typescript": "^5.8.3"
+  }
 }
-

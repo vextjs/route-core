@@ -1,16 +1,21 @@
 # route-core
 
-面向 Node.js 的超高性能路由引擎，由 Zig 原生 Radix Trie 驱动。
+> **状态：首期 TypeScript 实现已落地 / 私有预发布护栏开启**
+>
+> 当前仓库已提供 `route-core` 的首期 TypeScript 路由实现、CJS/ESM/types 构建入口、shared semantic cases 和 route-only benchmark。`package.json` 版本仍为 `0.0.1`，并保留 `private: true` 与 `prepublishOnly` 护栏；发布前仍需完成 vext 接入、e2e benchmark 和发布门禁复核。
 
-- **原生核心** — Zig 实现完整 trie；匹配在 V8 之外完成，params 以平铺数组返回，将 GC 压力降至最低
-- **自动降级** — 当原生 `.node` 二进制不可用时，包会透明地降级到语义完全一致的 JS trie
-- **框架无关** — 仅暴露最小 `add / find / allowed` API，任何 Node.js 框架均可几行代码接入
-- **TypeScript 支持** — 随包附带完整 `.d.ts` 类型声明
+`route-core` 目标是成为 `vext` 的第一方 Node.js 路由内核：首期用 TypeScript 实现零第三方路由依赖的 Radix Trie，逐步替换 vext 当前外部路由依赖；Zig/native backend 仅作为后续可选加速方向。
 
-## 目录
+- **第一方内核** — 作为 vext 自家组件接入，旧外部路由库只保留为迁移前现状基线
+- **首期 TS 核心** — TypeScript 实现完整 trie，作为默认实现、语义真相源与未来 backend 对照
+- **未来可选加速** — 只有 benchmark 证明路由内核成为瓶颈时，才另起 Zig/native backend PoC
+- **目标 API** — 暴露最小 `add / find / allowed` API，并预留 vext adapter-private fast path 决策空间
 
-- [安装](#安装)
-- [快速上手](#快速上手)
+## 目录导航
+
+- [当前状态](#当前状态)
+- [包导出契约](#包导出契约)
+- [目标 API 预览](#目标-api-预览)
 - [API 参考](#api-参考)
   - [createRouter(options?)](#createrouteroptions)
   - [RouterOptions](#routeroptions)
@@ -19,38 +24,51 @@
   - [router.allowed(path)](#routerallowedpath)
 - [404 与 405 区分](#404-与-405-区分)
 - [路由语法](#路由语法)
+  - [URL 与参数规范化](#url-与参数规范化)
   - [优先级](#优先级)
   - [ANY 方法](#any-方法)
 - [框架接入](#框架接入)
 - [TypeScript](#typescript)
-- [原生二进制与降级](#原生二进制与降级)
+- [Backend 策略](#backend-策略)
 - [从源码构建](#从源码构建)
 - [运行测试](#运行测试)
 - [性能基准](#性能基准)
 - [错误参考](#错误参考)
 - [License](#license)
 
-## 安装
+## 当前状态
 
-**Node.js 版本要求：`>=18.0.0`**
+当前仓库已进入首期 TypeScript 实现阶段：
 
-```bash
-npm install route-core
-```
+- `src/index.ts` 仅保留 public exports；首期 TypeScript backend 已拆分到 `src/backend/ts/`。
+- `package.json` 已提供 `main` / `module` / `types` / `exports`，构建后输出 `dist/index.cjs`、`dist/index.js` 与 `dist/index.d.ts`。
+- `test/shared/cases.mjs` 覆盖 static、params、wildcard、ANY、HEAD/OPTIONS、URL 编码、route shape、storeId 和 `allowed()` 边界。
+- `benchmark/route-only/index.mjs` 已提供 `find-my-way lookup()`、`find-my-way find()` 与 route-core TS backend 的 route-only 对照 benchmark。
+- `docs/api.md`、`docs/vext-integration.md` 与 `docs/benchmark.md` 已补充首期实现说明。
+- 尚未发布 npm 包，且 `private: true` 与 `prepublishOnly` 仍会阻止误发布。
+- Node.js 目标版本暂定为 `>=18.0.0`。
 
-以下三个平台包含预编译二进制，无需任何构建工具：
-
-| 平台 | 架构 |
-|------|------|
-| Linux | x64 |
-| Windows | x64 |
-| macOS | arm64（Apple Silicon）|
-
-`linux-arm64` 将在 `v0.1.x` 维护周期内追加。
+vext feature flag 接入、adapter-only/e2e benchmark、旧外部路由依赖移除和发布流程仍属于后续阶段；在此之前请继续以 `.devcodex/rutex/requirements/rutex-ts路由引擎/` 下的需求与技术方案为准。
 
 ---
 
-## 快速上手
+## 包导出契约
+
+首期公共包面采用 named exports，不把 default export 作为正式契约。
+
+| 消费方式 | 目标写法 |
+|----------|----------|
+| CJS | `const { createRouter } = require('route-core')` |
+| ESM | `import { createRouter } from 'route-core'` |
+| TypeScript 类型 | `import type { Router, RouterOptions, MatchResult } from 'route-core'` |
+
+当前 `package.json` 已提供 `main` / `module` / `types` 与 `exports.{import,require,types}`，分别指向 ESM、CJS 和类型声明产物。发布前仍保留 `private: true` 与 `prepublishOnly` 失败门禁。
+
+---
+
+## 目标 API 预览
+
+> 以下示例在执行 `npm install` 与 `npm run build` 后可通过本地构建产物运行。
 
 ```js
 const { createRouter } = require('route-core')
@@ -77,8 +95,7 @@ console.log(router.allowed('/users'))
 ESM 消费方式（适用于 `vext` 或 `type: "module"` 项目）：
 
 ```js
-import routeCore from 'route-core'
-const { createRouter } = routeCore
+import { createRouter } from 'route-core'
 ```
 
 ---
@@ -116,7 +133,7 @@ router.add(method: string, path: string, storeId: number): void
 |------|------|
 | `method` | HTTP 方法。支持 `GET`、`POST`、`PUT`、`PATCH`、`DELETE`、`HEAD`、`OPTIONS`、`CONNECT`、`ANY`；内部统一转为大写。自定义扩展 method 也被接受，但不保证与标准桶共享路由 |
 | `path` | 路由路径。支持静态段、`:param` 命名参数、`*name` 通配符后缀 |
-| `storeId` | 非负整数，命中时由路由器原样返回。框架用此值映射到自己的 handler/store |
+| `storeId` | 非负安全整数，命中时由路由器原样返回。框架用此值映射到自己的 handler/store |
 
 **抛出的错误**
 
@@ -125,6 +142,7 @@ router.add(method: string, path: string, storeId: number): void
 | `RouteConflictError` | `ERR_ROUTE_CONFLICT` | 同 method + 同 path 重复注册 |
 | `InvalidPathError` | `ERR_INVALID_PATH` | `allowWildcard: false` 且路径含 `*` |
 | `InvalidMethodError` | `ERR_INVALID_METHOD` | method 为空字符串 |
+| `InvalidStoreIdError` | `ERR_INVALID_STORE_ID` | `storeId` 不是非负安全整数 |
 
 ---
 
@@ -164,6 +182,8 @@ router.allowed(path: string): string[] | null
 
 `allowed()` 应在 `find()` 返回 `null` 后调用，仅用于确定响应状态码，不影响热路径性能。
 
+> vext 接入首期保持现有 wrong method 404 行为；`allowed()` 先作为 route-core 能力落地。若未来在 vext 响应层启用 405，需要作为单独用户可见契约变更同步测试、`changelogs/unreleased.md` 与文档。
+
 ---
 
 ## 404 与 405 区分
@@ -201,12 +221,26 @@ function dispatch(method, pathname, res) {
 
 ## 路由语法
 
+### URL 与参数规范化
+
+`route-core` 先按原始 `/` 分段，再处理参数值；`%2F` 不会产生新的路径段。
+
+| 输入处理 | 目标行为 |
+|----------|----------|
+| query/hash | `find()` / `allowed()` 输入中先剥离，不参与匹配 |
+| percent decode | 仅在路由命中后对参数和通配符值执行；解码失败时返回 `null` |
+| `%2F` | 保留在当前参数段内，返回 params 时解码为 `/` |
+| `caseSensitive=false` | 只影响匹配键；返回的 params 保留请求中的大小写语义 |
+| `maxParamLength` | 按解码后的参数/通配符值检查；超限时 `find()` 与 `allowed()` 均返回 `null` |
+
 | 模式 | 示例 | 匹配说明 |
 |------|------|---------|
 | 静态 | `/users/profile` | 精确匹配 `/users/profile` |
 | 参数 | `/users/:id` | `/users/42` → `{ id: "42" }` |
 | 通配符 | `/assets/*file` | `/assets/js/app.js` → `{ file: "js/app.js" }` |
 | 裸通配符 | `*` | 匹配任意路径 |
+
+重复路由按规范化 route shape 判断：`/users/:id` 与 `/users/:name` 视为同一路由 shape，`/assets/*file` 与 `/assets/*path` 也视为同一路由 shape，重复注册应抛 `RouteConflictError`。通配符只能位于末尾段；裸通配符命中时使用 `wildcard` 作为默认参数名。
 
 ### 优先级
 
@@ -245,9 +279,7 @@ router.find('DELETE', '/health')  // → { storeId: 1, params: null }
 `route-core` 与 HTTP 对象完全解耦，推荐采用 `storeId → store` 映射模式：
 
 ```ts
-import routeCore from 'route-core'
-
-const { createRouter } = routeCore
+import { createRouter } from 'route-core'
 
 interface RouteStore {
   handler: (req: any, res: any) => void
@@ -260,8 +292,8 @@ let nextId = 0
 
 function register(method: string, path: string, store: RouteStore) {
   const id = nextId++
-  storeMap.set(id, store)       // 必须先存 store，再调用 router.add
   router.add(method, path, id)
+  storeMap.set(id, store)       // add 成功后再写入，避免失败时留下脏 store
 }
 
 function resolve(method: string, pathname: string, res: any) {
@@ -291,64 +323,53 @@ function resolve(method: string, pathname: string, res: any) {
 `route-core` 随 JS 入口附带 `index.d.ts`，所有类型从包根导出：
 
 ```ts
-import routeCore from 'route-core'
+import { createRouter } from 'route-core'
 import type { Router, RouterOptions, MatchResult } from 'route-core'
-
-const { createRouter } = routeCore
 
 const router: Router = createRouter({ caseSensitive: true })
 ```
 
 ---
 
-## 原生二进制与降级
+## Backend 策略
 
-启动时 `route-core` 按以下顺序加载二进制：
+首期只实现 TypeScript backend：
 
-```
-prebuilds/<platform>-<arch>/rutex.node  ← 预编译（优先）
-./rutex.node                            ← 本地开发构建
-内嵌 JS fallback trie                   ← 始终可用
-```
+- npm 包名固定为 `route-core`。
+- 内部 backend id 为 `ts`。
+- `ts` backend 是默认实现、生产 fallback 与语义真相源。
+- Zig/native backend 不进入首期，只有在 route-only 或 vext e2e benchmark 证明路由内核成为明确瓶颈时才另起需求。
 
-JS fallback trie 与原生引擎在语义上完全一致——同一套测试用例同时覆盖两者。切换对调用方透明，无需修改任何代码。
+未来 Zig/native backend 必须复用相同 public API 与 shared cases，不得改变业务调用方式。
 
 ---
 
 ## 从源码构建
 
-需要 [Zig 0.14.x](https://ziglang.org/download/)。
+构建 ESM/CJS/types：
 
 ```bash
-# 拉取 vendored N-API 头文件（仅需执行一次）
-npm run vendor-headers
-
-# Release 构建 → ./rutex.node
+# 构建 ESM/CJS/types
 npm run build
 
-# Debug 构建
-npm run build:debug
+# 类型检查
+npm run typecheck
 ```
-
-**Windows** — 构建需要 `node.lib`，通过 Zig 构建选项传入其所在目录：
-
-```powershell
-zig build -Doptimize=ReleaseFast -Dnode-lib-path="C:\path\to\node-lib"
-```
-
-本地开发时若不传 `-Dnode-lib-path`，`build.zig` 会启用 `linker_allow_shlib_undefined` 允许构建完成；若生成的 `.node` 在运行时无法加载，程序自动退回 JS fallback trie。
 
 ---
 
 ## 运行测试
 
+运行测试：
+
 ```bash
-npm test                    # 全量测试
-npm run test:fallback       # 仅测 JS trie
-npm run test:native         # 仅测原生二进制
+npm test                    # 构建后运行全部 Node test cases
+npm run test:shared         # shared cases
+npm run test:router         # route-core ts backend
+npm run test:package        # ESM/CJS package entry
 ```
 
-共享测试用例（`test/shared/cases.mjs`）覆盖范围：
+目标共享测试用例（`test/shared/cases.mjs`）覆盖范围：
 
 - 静态、参数、通配符路由
 - 路由优先级（静态 > 参数 > 通配符）
@@ -356,35 +377,39 @@ npm run test:native         # 仅测原生二进制
 - 尾斜杠规范化
 - 大小写不敏感匹配
 - `maxParamLength` 边界（500 字符命中，501 字符返回 `null`）
+- URL 编码边界：合法 percent decode、malformed `%`、`%2F`、params 大小写保真
 - 重复路由检测
+- route shape 冲突：`:id` vs `:name`、`*file` vs `*path`、通配符非末尾段、裸通配符默认参数名
 - 未命中返回 `null`
-- `allowed()` 404 / 405 区分
+- `allowed()` 404 / 405 区分、ANY-only 返回 `null`、参数超长返回 `null`、HEAD/OPTIONS 策略、Allow 顺序与去重
+- `storeId` 合法性与注册失败不污染外部 store
 
 ---
 
 ## 性能基准
 
+运行 route-only benchmark：
+
 ```bash
-npm run bench              # 纯路由吞吐量（native vs JS fallback）
-npm run bench:integration  # 端到端 autocannon 30 秒
+npm run bench              # find-my-way lookup/find 与 route-core TS backend 对照
 ```
 
 验收门槛：
 
 | 场景 | 门槛 |
 |------|------|
-| 参数路由吞吐量（native）| ≥ JS fallback × 2 |
-| 静态路由吞吐量（native）| ≥ JS fallback × 1.5 |
-| 大路由表（500 条）吞吐量（native）| ≥ JS fallback × 2 |
-| autocannon p99 延迟（100 并发，30s）| ≤ 1ms |
+| 纯路由基线 | 当前脚本输出 `find-my-way lookup()`、`find-my-way find()` 与 `route-core(ts backend)` 的静态、参数、通配符与 miss 吞吐量 |
+| vext e2e RPS | 不超过 P0 确认的回退预算，默认建议 `<= 5%` |
+| vext e2e p99 | 不高于当前基线 + P0 确认预算 |
 | 参数路由 10 万次调用后堆增长 | < 10 MB |
+| 旧外部路由依赖 | P8 默认启用后不再出现在 vext runtime dependencies |
 
 ---
 
 ## 错误参考
 
 ```js
-const { RouteConflictError, InvalidPathError, InvalidMethodError } = require('route-core')
+const { RouteConflictError, InvalidPathError, InvalidMethodError, InvalidStoreIdError } = require('route-core')
 
 try {
   router.add('GET', '/foo', 0)
@@ -400,6 +425,7 @@ try {
 | `RouteConflictError` | `ERR_ROUTE_CONFLICT` | 同 method + 同 path 重复注册 |
 | `InvalidPathError` | `ERR_INVALID_PATH` | `allowWildcard: false` 时注册含 `*` 路径 |
 | `InvalidMethodError` | `ERR_INVALID_METHOD` | method 为空字符串 |
+| `InvalidStoreIdError` | `ERR_INVALID_STORE_ID` | `storeId` 不是非负安全整数 |
 
 ---
 

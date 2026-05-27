@@ -1,2 +1,2 @@
-// rutex — coming soon
+export * from './dist/index.js'
 
