@@ -7,6 +7,7 @@ export function runRouterCases(createRouter, errors) {
     InvalidStoreIdError,
     RouteConflictError,
   } = errors
+  const match = (storeId, params, routePath) => ({ storeId, params, routePath })
 
   {
     const router = createRouter()
@@ -15,9 +16,9 @@ export function runRouterCases(createRouter, errors) {
     router.add('GET', '/users/*rest', 2)
     router.add('POST', '/users', 3)
 
-    assert.deepEqual(router.find('GET', '/users'), { storeId: 0, params: null })
-    assert.deepEqual(router.find('GET', '/users/42'), { storeId: 1, params: { id: '42' } })
-    assert.deepEqual(router.find('GET', '/users/profile'), { storeId: 1, params: { id: 'profile' } })
+    assert.deepEqual(router.find('GET', '/users'), match(0, null, '/users'))
+    assert.deepEqual(router.find('GET', '/users/42'), match(1, { id: '42' }, '/users/:id'))
+    assert.deepEqual(router.find('GET', '/users/profile'), match(1, { id: 'profile' }, '/users/:id'))
     assert.deepEqual(router.allowed('/users'), ['GET', 'POST'])
     assert.equal(router.find('DELETE', '/users'), null)
   }
@@ -28,9 +29,9 @@ export function runRouterCases(createRouter, errors) {
     router.add('GET', '/users/:id', 11)
     router.add('GET', '/users/*rest', 12)
 
-    assert.deepEqual(router.find('GET', '/users/profile'), { storeId: 10, params: null })
-    assert.deepEqual(router.find('GET', '/users/42'), { storeId: 11, params: { id: '42' } })
-    assert.deepEqual(router.find('GET', '/users/a/b'), { storeId: 12, params: { rest: 'a/b' } })
+    assert.deepEqual(router.find('GET', '/users/profile'), match(10, null, '/users/profile'))
+    assert.deepEqual(router.find('GET', '/users/42'), match(11, { id: '42' }, '/users/:id'))
+    assert.deepEqual(router.find('GET', '/users/a/b'), match(12, { rest: 'a/b' }, '/users/*rest'))
   }
 
   {
@@ -38,8 +39,8 @@ export function runRouterCases(createRouter, errors) {
     router.add('ANY', '/health', 1)
     router.add('GET', '/health', 2)
 
-    assert.deepEqual(router.find('GET', '/health'), { storeId: 2, params: null })
-    assert.deepEqual(router.find('DELETE', '/health'), { storeId: 1, params: null })
+    assert.deepEqual(router.find('GET', '/health'), match(2, null, '/health'))
+    assert.deepEqual(router.find('DELETE', '/health'), match(1, null, '/health'))
     assert.deepEqual(router.allowed('/health'), ['GET'])
 
     const anyOnly = createRouter()
@@ -52,8 +53,8 @@ export function runRouterCases(createRouter, errors) {
     router.add('GET', '/files/:name', 4)
     router.add('GET', '/case/:value', 5)
 
-    assert.deepEqual(router.find('GET', '/files/a%2Fb'), { storeId: 4, params: { name: 'a/b' } })
-    assert.deepEqual(router.find('GET', '/case/MiXeD'), { storeId: 5, params: { value: 'MiXeD' } })
+    assert.deepEqual(router.find('GET', '/files/a%2Fb'), match(4, { name: 'a/b' }, '/files/:name'))
+    assert.deepEqual(router.find('GET', '/case/MiXeD'), match(5, { value: 'MiXeD' }, '/case/:value'))
     assert.equal(router.find('GET', '/files/%E0%A4%A'), null)
     assert.equal(router.allowed('/files/%E0%A4%A'), null)
   }
@@ -62,7 +63,7 @@ export function runRouterCases(createRouter, errors) {
     const router = createRouter({ maxParamLength: 3 })
     router.add('GET', '/short/:value', 6)
 
-    assert.deepEqual(router.find('GET', '/short/abc'), { storeId: 6, params: { value: 'abc' } })
+    assert.deepEqual(router.find('GET', '/short/abc'), match(6, { value: 'abc' }, '/short/:value'))
     assert.equal(router.find('GET', '/short/abcd'), null)
     assert.equal(router.allowed('/short/abcd'), null)
   }
@@ -70,7 +71,7 @@ export function runRouterCases(createRouter, errors) {
   {
     const router = createRouter()
     router.add('GET', '/trail', 7)
-    assert.deepEqual(router.find('GET', '/trail/'), { storeId: 7, params: null })
+    assert.deepEqual(router.find('GET', '/trail/'), match(7, null, '/trail'))
 
     const strictSlash = createRouter({ ignoreTrailingSlash: false })
     strictSlash.add('GET', '/trail', 8)
@@ -80,19 +81,19 @@ export function runRouterCases(createRouter, errors) {
   {
     const router = createRouter({ caseSensitive: true })
     router.add('GET', '/Users', 9)
-    assert.deepEqual(router.find('GET', '/Users'), { storeId: 9, params: null })
+    assert.deepEqual(router.find('GET', '/Users'), match(9, null, '/Users'))
     assert.equal(router.find('GET', '/users'), null)
   }
 
   {
     const router = createRouter()
     router.add('GET', '/assets/*file', 13)
-    assert.deepEqual(router.find('GET', '/assets/js/app.js'), { storeId: 13, params: { file: 'js/app.js' } })
-    assert.deepEqual(router.find('GET', '/assets'), { storeId: 13, params: { file: '' } })
+    assert.deepEqual(router.find('GET', '/assets/js/app.js'), match(13, { file: 'js/app.js' }, '/assets/*file'))
+    assert.deepEqual(router.find('GET', '/assets'), match(13, { file: '' }, '/assets/*file'))
 
     const bare = createRouter()
     bare.add('GET', '*', 14)
-    assert.deepEqual(bare.find('GET', '/anything/here'), { storeId: 14, params: { wildcard: 'anything/here' } })
+    assert.deepEqual(bare.find('GET', '/anything/here'), match(14, { wildcard: 'anything/here' }, '*'))
   }
 
   {
@@ -136,5 +137,28 @@ export function runRouterCases(createRouter, errors) {
     getOnly.add('GET', '/head', 33)
     assert.equal(getOnly.find('HEAD', '/head'), null)
     assert.deepEqual(getOnly.allowed('/head'), ['GET'])
+  }
+
+  {
+    const router = createRouter()
+    router.add('GET', '/lookup/:id', 40)
+    router.add('ANY', '/lookup/fallback', 41)
+
+    let callbackArgs = null
+    const found = router.lookup('GET', '/lookup/abc', (storeId, params, routePath) => {
+      callbackArgs = { storeId, params, routePath }
+    })
+    assert.equal(found, true)
+    assert.deepEqual(callbackArgs, match(40, { id: 'abc' }, '/lookup/:id'))
+
+    callbackArgs = null
+    const anyFound = router.lookup('DELETE', '/lookup/fallback', (storeId, params, routePath) => {
+      callbackArgs = { storeId, params, routePath }
+    })
+    assert.equal(anyFound, true)
+    assert.deepEqual(callbackArgs, match(41, null, '/lookup/fallback'))
+
+    assert.equal(router.lookup('GET', '/missing', () => {}), false)
+    assert.throws(() => router.lookup('GET', '/lookup/abc', null), TypeError)
   }
 }

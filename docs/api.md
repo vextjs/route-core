@@ -26,10 +26,34 @@ import type { MatchResult, Router, RouterOptions } from 'route-core'
 const router = createRouter(options)
 router.add(method, path, storeId)
 router.find(method, path)
+router.lookup(method, path, onMatch)
 router.allowed(path)
 ```
 
-`storeId` must be a non-negative safe integer. The router stores only ids and params; frameworks keep their own handler store.
+`storeId` must be a non-negative safe integer. The router stores ids and route templates; frameworks keep their own handler store.
+
+`find()` returns:
+
+```ts
+interface MatchResult {
+	storeId: number
+	params: Record<string, string> | null
+	routePath: string
+}
+```
+
+`routePath` is the registered template, such as `/users/:id`. Frameworks can use it for low-cardinality observability fields like `req.route`.
+
+`lookup()` is the adapter hot-path API:
+
+```ts
+router.lookup(method, path, (storeId, params, routePath) => {
+	const store = stores[storeId]
+	store.handler(params, routePath)
+})
+```
+
+It returns `true` on match and `false` on miss or invalid match input.
 
 ## Matching Semantics
 

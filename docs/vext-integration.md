@@ -25,7 +25,22 @@ vext should map framework route stores outside `route-core`:
 ```ts
 const id = nextId++
 router.add(method, path, id)
-storeMap.set(id, store)
+storeMap.set(id, { routePath: path, chain })
 ```
 
 If `router.add()` throws, the store must not be inserted.
+
+## Adapter Hot Path
+
+The native adapter should prefer `lookup()` over `find()` once it prototypes the `route-core` backend:
+
+```ts
+router.lookup(method, pathname, (storeId, params, routePath) => {
+	const store = storeMap.get(storeId)
+	req.route = routePath
+	req.params = params ?? {}
+	executeChain(store.chain, req, res)
+})
+```
+
+`routePath` must be preserved because vext uses `req.route` as a low-cardinality observability field. This is part of the adapter compatibility contract, not only a debug convenience.

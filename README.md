@@ -1,26 +1,24 @@
 # route-core
 
-> **状态：首期 TypeScript 实现已落地 / 私有预发布护栏开启**
->
-> 当前仓库已提供 `route-core` 的首期 TypeScript 路由实现、CJS/ESM/types 构建入口、shared semantic cases 和 route-only benchmark。`package.json` 版本仍为 `0.0.1`，并保留 `private: true` 与 `prepublishOnly` 护栏；发布前仍需完成 vext 接入、e2e benchmark 和发布门禁复核。
+`route-core` is a small, zero-runtime-dependency routing engine for Node.js frameworks. It maps HTTP methods and paths to numeric `storeId` values, returns decoded route params, preserves the registered route template, and keeps handler storage in the host framework.
 
-`route-core` 目标是成为 `vext` 的第一方 Node.js 路由内核：首期用 TypeScript 实现零第三方路由依赖的 Radix Trie，逐步替换 vext 当前外部路由依赖；Zig/native backend 仅作为后续可选加速方向。
+It is built for framework adapters that want a focused router core rather than a full HTTP dispatcher.
 
-- **第一方内核** — 作为 vext 自家组件接入，旧外部路由库只保留为迁移前现状基线
-- **首期 TS 核心** — TypeScript 实现完整 trie，作为默认实现、语义真相源与未来 backend 对照
-- **未来可选加速** — 只有 benchmark 证明路由内核成为瓶颈时，才另起 Zig/native backend PoC
-- **目标 API** — 暴露最小 `add / find / allowed` API，并预留 vext adapter-private fast path 决策空间
+- **Tiny public surface** — `add`, `find`, `lookup`, and `allowed`.
+- **Framework-owned stores** — route-core stores ids and params; your adapter owns handlers, middleware, metadata, and response behavior.
+- **Template-aware matching** — matches include `routePath`, so frameworks can set low-cardinality fields such as `req.route`.
+- **CJS, ESM, and types** — the package exposes CommonJS, ES module, and TypeScript declaration entry points.
 
 ## 目录导航
 
-- [当前状态](#当前状态)
-- [包导出契约](#包导出契约)
-- [目标 API 预览](#目标-api-预览)
+- [Install](#install)
+- [Quick Start](#quick-start)
 - [API 参考](#api-参考)
   - [createRouter(options?)](#createrouteroptions)
   - [RouterOptions](#routeroptions)
   - [router.add(method, path, storeId)](#routeraddmethod-path-storeid)
   - [router.find(method, path)](#routerfindmethod-path)
+  - [router.lookup(method, path, onMatch)](#routerlookupmethod-path-onmatch)
   - [router.allowed(path)](#routerallowedpath)
 - [404 与 405 区分](#404-与-405-区分)
 - [路由语法](#路由语法)
@@ -29,46 +27,33 @@
   - [ANY 方法](#any-方法)
 - [框架接入](#框架接入)
 - [TypeScript](#typescript)
-- [Backend 策略](#backend-策略)
-- [从源码构建](#从源码构建)
-- [运行测试](#运行测试)
-- [性能基准](#性能基准)
 - [错误参考](#错误参考)
+- [更多文档](#更多文档)
 - [License](#license)
 
-## 当前状态
+## Install
 
-当前仓库已进入首期 TypeScript 实现阶段：
-
-- `src/index.ts` 仅保留 public exports；首期 TypeScript backend 已拆分到 `src/backend/ts/`。
-- `package.json` 已提供 `main` / `module` / `types` / `exports`，构建后输出 `dist/index.cjs`、`dist/index.js` 与 `dist/index.d.ts`。
-- `test/shared/cases.mjs` 覆盖 static、params、wildcard、ANY、HEAD/OPTIONS、URL 编码、route shape、storeId 和 `allowed()` 边界。
-- `benchmark/route-only/index.mjs` 已提供 `find-my-way lookup()`、`find-my-way find()` 与 route-core TS backend 的 route-only 对照 benchmark。
-- `docs/api.md`、`docs/vext-integration.md` 与 `docs/benchmark.md` 已补充首期实现说明。
-- 尚未发布 npm 包，且 `private: true` 与 `prepublishOnly` 仍会阻止误发布。
-- Node.js 目标版本暂定为 `>=18.0.0`。
-
-vext feature flag 接入、adapter-only/e2e benchmark、旧外部路由依赖移除和发布流程仍属于后续阶段；在此之前请继续以 `.devcodex/rutex/requirements/rutex-ts路由引擎/` 下的需求与技术方案为准。
+```bash
+npm install route-core
+```
 
 ---
 
-## 包导出契约
+## Quick Start
 
-首期公共包面采用 named exports，不把 default export 作为正式契约。
+CommonJS:
 
-| 消费方式 | 目标写法 |
-|----------|----------|
-| CJS | `const { createRouter } = require('route-core')` |
-| ESM | `import { createRouter } from 'route-core'` |
-| TypeScript 类型 | `import type { Router, RouterOptions, MatchResult } from 'route-core'` |
+```js
+const { createRouter } = require('route-core')
+```
 
-当前 `package.json` 已提供 `main` / `module` / `types` 与 `exports.{import,require,types}`，分别指向 ESM、CJS 和类型声明产物。发布前仍保留 `private: true` 与 `prepublishOnly` 失败门禁。
+ES modules:
+
+```js
+import { createRouter } from 'route-core'
+```
 
 ---
-
-## 目标 API 预览
-
-> 以下示例在执行 `npm install` 与 `npm run build` 后可通过本地构建产物运行。
 
 ```js
 const { createRouter } = require('route-core')
@@ -80,10 +65,10 @@ router.add('GET',  '/users/:id', 1)
 router.add('POST', '/users',     2)
 
 console.log(router.find('GET', '/users'))
-// → { storeId: 0, params: null }
+// → { storeId: 0, params: null, routePath: '/users' }
 
 console.log(router.find('GET', '/users/42'))
-// → { storeId: 1, params: { id: '42' } }
+// → { storeId: 1, params: { id: '42' }, routePath: '/users/:id' }
 
 console.log(router.find('DELETE', '/users'))
 // → null
@@ -92,10 +77,14 @@ console.log(router.allowed('/users'))
 // → ['GET', 'POST']  （路径存在，但 DELETE 未注册）
 ```
 
-ESM 消费方式（适用于 `vext` 或 `type: "module"` 项目）：
+Use `lookup()` when an adapter wants a direct callback on match:
 
 ```js
-import { createRouter } from 'route-core'
+router.lookup('GET', '/users/42', (storeId, params, routePath) => {
+  console.log(storeId)   // 1
+  console.log(params)    // { id: '42' }
+  console.log(routePath) // '/users/:id'
+})
 ```
 
 ---
@@ -158,12 +147,34 @@ router.find(method: string, path: string): MatchResult | null
 interface MatchResult {
   storeId: number
   params:  Record<string, string> | null  // 无参数路由命中时为 null
+  routePath: string                        // 注册时的路由模板，如 /users/:id
 }
 ```
 
 `find()` 返回 `null` 的情形：
 - 无路由匹配（路径不存在，或路径存在但 method 未注册且无 ANY 兜底）
 - 参数段长度超过 `maxParamLength`
+
+---
+
+### `router.lookup(method, path, onMatch)`
+
+查找路由并在命中时直接调用回调。这个 API 面向 adapter 热路径：框架可用 `storeId` 映射自己的 handler/store，并用 `routePath` 注入低基数字段，例如 vext 的 `req.route`。
+
+```ts
+router.lookup(
+  method: string,
+  path: string,
+  onMatch: (storeId: number, params: Record<string, string> | null, routePath: string) => void,
+): boolean
+```
+
+| 返回值 | 含义 |
+|--------|------|
+| `true` | 命中路由，且已调用 `onMatch` |
+| `false` | 未命中路由，或 URL 参数非法/超限 |
+
+`lookup()` 与 `find()` 使用同一套匹配语义；区别是 `lookup()` 不返回 `MatchResult` 对象，更适合 adapter 在命中后直接调度 handler。
 
 ---
 
@@ -266,8 +277,8 @@ GET /users/*rest
 router.add('GET', '/health', 0)   // 仅匹配 GET
 router.add('ANY', '/health', 1)   // 匹配其他所有 method
 
-router.find('GET',    '/health')  // → { storeId: 0, params: null }
-router.find('DELETE', '/health')  // → { storeId: 1, params: null }
+router.find('GET',    '/health')  // → { storeId: 0, params: null, routePath: '/health' }
+router.find('DELETE', '/health')  // → { storeId: 1, params: null, routePath: '/health' }
 ```
 
 > 注意：注册了 `ANY /path` 时，`find()` 对该路径永远不会返回 `null`，因此 `allowed()` 不适用于此类路径。
@@ -302,6 +313,7 @@ function resolve(method: string, pathname: string, res: any) {
     return {
       store:  storeMap.get(match.storeId)!,
       params: match.params ?? {},
+      route:  match.routePath,
     }
   }
 
@@ -324,85 +336,10 @@ function resolve(method: string, pathname: string, res: any) {
 
 ```ts
 import { createRouter } from 'route-core'
-import type { Router, RouterOptions, MatchResult } from 'route-core'
+import type { LookupHandler, MatchResult, Router, RouterOptions } from 'route-core'
 
 const router: Router = createRouter({ caseSensitive: true })
 ```
-
----
-
-## Backend 策略
-
-首期只实现 TypeScript backend：
-
-- npm 包名固定为 `route-core`。
-- 内部 backend id 为 `ts`。
-- `ts` backend 是默认实现、生产 fallback 与语义真相源。
-- Zig/native backend 不进入首期，只有在 route-only 或 vext e2e benchmark 证明路由内核成为明确瓶颈时才另起需求。
-
-未来 Zig/native backend 必须复用相同 public API 与 shared cases，不得改变业务调用方式。
-
----
-
-## 从源码构建
-
-构建 ESM/CJS/types：
-
-```bash
-# 构建 ESM/CJS/types
-npm run build
-
-# 类型检查
-npm run typecheck
-```
-
----
-
-## 运行测试
-
-运行测试：
-
-```bash
-npm test                    # 构建后运行全部 Node test cases
-npm run test:shared         # shared cases
-npm run test:router         # route-core ts backend
-npm run test:package        # ESM/CJS package entry
-```
-
-目标共享测试用例（`test/shared/cases.mjs`）覆盖范围：
-
-- 静态、参数、通配符路由
-- 路由优先级（静态 > 参数 > 通配符）
-- `ANY` 方法兜底
-- 尾斜杠规范化
-- 大小写不敏感匹配
-- `maxParamLength` 边界（500 字符命中，501 字符返回 `null`）
-- URL 编码边界：合法 percent decode、malformed `%`、`%2F`、params 大小写保真
-- 重复路由检测
-- route shape 冲突：`:id` vs `:name`、`*file` vs `*path`、通配符非末尾段、裸通配符默认参数名
-- 未命中返回 `null`
-- `allowed()` 404 / 405 区分、ANY-only 返回 `null`、参数超长返回 `null`、HEAD/OPTIONS 策略、Allow 顺序与去重
-- `storeId` 合法性与注册失败不污染外部 store
-
----
-
-## 性能基准
-
-运行 route-only benchmark：
-
-```bash
-npm run bench              # find-my-way lookup/find 与 route-core TS backend 对照
-```
-
-验收门槛：
-
-| 场景 | 门槛 |
-|------|------|
-| 纯路由基线 | 当前脚本输出 `find-my-way lookup()`、`find-my-way find()` 与 `route-core(ts backend)` 的静态、参数、通配符与 miss 吞吐量 |
-| vext e2e RPS | 不超过 P0 确认的回退预算，默认建议 `<= 5%` |
-| vext e2e p99 | 不高于当前基线 + P0 确认预算 |
-| 参数路由 10 万次调用后堆增长 | < 10 MB |
-| 旧外部路由依赖 | P8 默认启用后不再出现在 vext runtime dependencies |
 
 ---
 
@@ -426,6 +363,15 @@ try {
 | `InvalidPathError` | `ERR_INVALID_PATH` | `allowWildcard: false` 时注册含 `*` 路径 |
 | `InvalidMethodError` | `ERR_INVALID_METHOD` | method 为空字符串 |
 | `InvalidStoreIdError` | `ERR_INVALID_STORE_ID` | `storeId` 不是非负安全整数 |
+
+---
+
+## 更多文档
+
+- [API details](docs/api.md)
+- [vext integration notes](docs/vext-integration.md)
+- [Benchmark notes](docs/benchmark.md)
+- [Changelog](changelogs/v0.0.2.md)
 
 ---
 

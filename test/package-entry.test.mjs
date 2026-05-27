@@ -9,11 +9,13 @@ describe('package entries', () => {
     const mod = await import('../dist/index.js')
     assert.equal(typeof mod.createRouter, 'function')
     assert.equal('default' in mod, false)
+    assert.equal(typeof mod.createRouter().lookup, 'function')
   })
 
   it('supports CJS named exports', () => {
     const mod = require('../dist/index.cjs')
     assert.equal(typeof mod.createRouter, 'function')
     assert.equal(typeof mod.RouteConflictError, 'function')
+    assert.equal(typeof mod.createRouter().lookup, 'function')
   })
 })

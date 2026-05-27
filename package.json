@@ -1,7 +1,6 @@
 {
   "name": "route-core",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.0.2",
   "description": "Ultra‑fast, minimal routing engine for Node.js. Built for hot paths.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -17,7 +16,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node scripts/finalize-build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test test/router.test.mjs test/package-entry.test.mjs",
+    "test": "npm run build && node --test test/router.test.mjs test/package-entry.test.mjs test/vext-compat.test.mjs",
     "test:shared": "npm run build && node --test test/router.test.mjs",
     "test:router": "npm run build && node --test test/router.test.mjs",
     "test:package": "npm run build && node --test test/package-entry.test.mjs",
@@ -29,7 +28,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vextjs/rutex.git"
+    "url": "git+https://github.com/vextjs/route-core.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "dist",

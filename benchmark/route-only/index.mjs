@@ -40,6 +40,10 @@ bench('route-core static', (index) => {
   routeCore.find('GET', `/static/${index % 1000}`)
 })
 
+bench('route-core lookup static', (index) => {
+  routeCore.lookup('GET', `/static/${index % 1000}`, noop)
+})
+
 bench('find-my-way lookup params', (index) => {
   lookup(findMyWayLookup, 'GET', `/users/${index % 1000}/abc`)
 })
@@ -50,6 +54,10 @@ bench('find-my-way find params', (index) => {
 
 bench('route-core params', (index) => {
   routeCore.find('GET', `/users/${index % 1000}/abc`)
+})
+
+bench('route-core lookup params', (index) => {
+  routeCore.lookup('GET', `/users/${index % 1000}/abc`, noop)
 })
 
 bench('find-my-way lookup wildcard', (index) => {
@@ -64,6 +72,10 @@ bench('route-core wildcard', (index) => {
   routeCore.find('GET', `/assets/js/${index}/app.js`)
 })
 
+bench('route-core lookup wildcard', (index) => {
+  routeCore.lookup('GET', `/assets/js/${index}/app.js`, noop)
+})
+
 bench('find-my-way lookup miss', (index) => {
   lookup(findMyWayLookup, 'GET', `/missing/${index}`)
 })
@@ -75,3 +87,9 @@ bench('find-my-way find miss', (index) => {
 bench('route-core miss', (index) => {
   routeCore.find('GET', `/missing/${index}`)
 })
+
+bench('route-core lookup miss', (index) => {
+  routeCore.lookup('GET', `/missing/${index}`, noop)
+})
+
+function noop() {}

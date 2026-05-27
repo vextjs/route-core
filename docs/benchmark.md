@@ -8,11 +8,12 @@ Run:
 npm run bench
 ```
 
-The benchmark compares three paths for static, param, wildcard, and miss cases:
+The benchmark compares four paths for static, param, wildcard, and miss cases:
 
 - `find-my-way lookup()`
 - `find-my-way find()`
-- `route-core(ts backend)`
+- `route-core.find()`
+- `route-core.lookup()`
 
 This benchmark is a package-level signal only. It does not replace vext adapter-only or e2e benchmarks.
 

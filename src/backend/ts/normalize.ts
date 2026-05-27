@@ -26,14 +26,7 @@ export function normalizeMethod(method: string): string {
 }
 
 export function parseRoutePath(path: string, options: Required<RouterOptions>): Segment[] {
-  if (typeof path !== "string") {
-    throw new InvalidPathError("path must be a string")
-  }
-
-  let normalizedPath = stripQueryHash(path.trim())
-  if (normalizedPath === "") {
-    normalizedPath = "/"
-  }
+  const normalizedPath = normalizeRouteTemplate(path, options)
 
   if (normalizedPath === "*") {
     if (!options.allowWildcard) {
@@ -41,12 +34,6 @@ export function parseRoutePath(path: string, options: Required<RouterOptions>): 
     }
     return [{ kind: "wildcard", name: "wildcard" }]
   }
-
-  if (!normalizedPath.startsWith("/")) {
-    throw new InvalidPathError("path must start with / or be a bare * wildcard")
-  }
-
-  normalizedPath = normalizeTrailingSlash(normalizedPath, options.ignoreTrailingSlash)
   const rawSegments = splitPathSegments(normalizedPath)
   const segments: Segment[] = []
 
@@ -88,6 +75,27 @@ export function parseRoutePath(path: string, options: Required<RouterOptions>): 
   }
 
   return segments
+}
+
+export function normalizeRouteTemplate(path: string, options: Required<RouterOptions>): string {
+  if (typeof path !== "string") {
+    throw new InvalidPathError("path must be a string")
+  }
+
+  let normalizedPath = stripQueryHash(path.trim())
+  if (normalizedPath === "") {
+    normalizedPath = "/"
+  }
+
+  if (normalizedPath === "*") {
+    return normalizedPath
+  }
+
+  if (!normalizedPath.startsWith("/")) {
+    throw new InvalidPathError("path must start with / or be a bare * wildcard")
+  }
+
+  return normalizeTrailingSlash(normalizedPath, options.ignoreTrailingSlash)
 }
 
 export function prepareMatchPath(path: string, options: Required<RouterOptions>): PreparedPath | null {

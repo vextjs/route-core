@@ -45,3 +45,12 @@ jobs:
         run: npm run bench
         env:
           ROUTE_CORE_BENCH_ITERATIONS: 10000
+
+      - name: Runtime dependency check
+        run: npm ls --omit=dev
+
+      - name: Security audit
+        run: npm audit --omit=dev
+
+      - name: Package dry run
+        run: npm pack --dry-run

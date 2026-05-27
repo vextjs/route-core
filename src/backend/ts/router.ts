@@ -1,10 +1,16 @@
 import { ANY_METHOD, BUILTIN_METHOD_ORDER, DEFAULT_OPTIONS } from "../../constants.js"
 import { InvalidPathError, RouteConflictError } from "../../errors.js"
-import type { MatchResult, Router, RouterOptions } from "../../types.js"
+import type { LookupHandler, MatchResult, Router, RouterOptions } from "../../types.js"
 import { assertStoreId } from "../../internal/assert.js"
 import { findAllowedMethods } from "./allowed.js"
-import { normalizeMethod, parseRoutePath, prepareMatchPath, type PreparedPath } from "./normalize.js"
-import { matchNode, TrieNode } from "./trie.js"
+import {
+  normalizeMethod,
+  normalizeRouteTemplate,
+  parseRoutePath,
+  prepareMatchPath,
+  type PreparedPath,
+} from "./normalize.js"
+import { lookupNode, matchNode, TrieNode } from "./trie.js"
 
 export class RouteCoreRouter implements Router {
   private readonly buckets = new Map<string, TrieNode>()
@@ -26,6 +32,7 @@ export class RouteCoreRouter implements Router {
 
   add(method: string, path: string, storeId: number): void {
     const normalizedMethod = normalizeMethod(method)
+    const routePath = normalizeRouteTemplate(path, this.options)
     const routeSegments = parseRoutePath(path, this.options)
     assertStoreId(storeId)
 
@@ -66,6 +73,7 @@ export class RouteCoreRouter implements Router {
     }
 
     node.storeId = storeId
+    node.routePath = routePath
     node.paramNames = paramNames
     node.wildcardName = wildcardName
   }
@@ -83,6 +91,28 @@ export class RouteCoreRouter implements Router {
     }
 
     return this.findInBucket(ANY_METHOD, preparedPath)
+  }
+
+  lookup(method: string, path: string, onMatch: LookupHandler): boolean {
+    if (typeof onMatch !== "function") {
+      throw new TypeError("onMatch must be a function")
+    }
+
+    const normalizedMethod = normalizeMethod(method)
+    const preparedPath = prepareMatchPath(path, this.options)
+    if (!preparedPath) {
+      return false
+    }
+
+    if (this.lookupInBucket(normalizedMethod, preparedPath, onMatch)) {
+      return true
+    }
+
+    if (normalizedMethod === ANY_METHOD) {
+      return false
+    }
+
+    return this.lookupInBucket(ANY_METHOD, preparedPath, onMatch)
   }
 
   allowed(path: string): string[] | null {
@@ -114,6 +144,19 @@ export class RouteCoreRouter implements Router {
     }
 
     return matchNode(bucket, preparedPath, 0, [], this.options)
+  }
+
+  private lookupInBucket(
+    method: string,
+    preparedPath: PreparedPath,
+    onMatch: LookupHandler,
+  ): boolean {
+    const bucket = this.buckets.get(method)
+    if (!bucket) {
+      return false
+    }
+
+    return lookupNode(bucket, preparedPath, 0, [], this.options, onMatch)
   }
 
   private methodScanOrder(): string[] {
