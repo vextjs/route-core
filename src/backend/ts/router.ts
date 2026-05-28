@@ -156,7 +156,7 @@ export class RouteCoreRouter implements Router {
       return false
     }
 
-    return lookupNode(bucket, preparedPath, 0, [], this.options, onMatch)
+    return lookupNode(bucket, preparedPath, 0, [], 0, this.options, onMatch)
   }
 
   private methodScanOrder(): string[] {

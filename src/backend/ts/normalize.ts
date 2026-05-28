@@ -9,7 +9,6 @@ export type Segment =
 
 export type PreparedPath = {
   rawSegments: string[]
-  keySegments: string[]
 }
 
 export function normalizeMethod(method: string): string {
@@ -113,17 +112,8 @@ export function prepareMatchPath(path: string, options: Required<RouterOptions>)
   }
 
   normalizedPath = normalizeTrailingSlash(normalizedPath, options.ignoreTrailingSlash)
-  const rawSegments = splitPathSegments(normalizedPath)
-
-  for (const segment of rawSegments) {
-    if (decodeSegment(segment) === null) {
-      return null
-    }
-  }
-
   return {
-    rawSegments,
-    keySegments: rawSegments.map((segment) => normalizeSegmentKey(segment, options.caseSensitive)),
+    rawSegments: splitPathSegments(normalizedPath),
   }
 }
 

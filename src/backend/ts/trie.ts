@@ -31,10 +31,20 @@ export function matchNode(
   options: Required<RouterOptions>,
 ): MatchState | null {
   let result: MatchState | null = null
-  lookupNode(node, preparedPath, offset, captures, options, (storeId, params, routePath) => {
+  lookupNode(node, preparedPath, offset, captures, 0, options, (storeId, params, routePath) => {
     result = { storeId, params, routePath }
   })
   return result
+}
+
+export function matchesNode(
+  node: TrieNode,
+  preparedPath: PreparedPath,
+  offset: number,
+  captures: string[],
+  options: Required<RouterOptions>,
+): boolean {
+  return matchesNodeInternal(node, preparedPath, offset, captures, 0, options)
 }
 
 export function lookupNode(
@@ -42,50 +52,97 @@ export function lookupNode(
   preparedPath: PreparedPath,
   offset: number,
   captures: string[],
+  captureCount: number,
   options: Required<RouterOptions>,
   onMatch: LookupHandler,
 ): boolean {
   if (offset === preparedPath.rawSegments.length) {
     if (node.storeId !== null) {
-      return finalizeLookup(node, captures, options, onMatch)
+      return finalizeLookup(node, captures, captureCount, options, onMatch)
     }
 
     if (node.wildcardChild && node.wildcardChild.storeId !== null) {
-      return finalizeLookup(node.wildcardChild, [...captures, ""], options, onMatch)
+      captures[captureCount] = ""
+      return finalizeLookup(node.wildcardChild, captures, captureCount + 1, options, onMatch)
     }
 
     return false
   }
 
-  const keySegment = preparedPath.keySegments[offset]
   const rawSegment = preparedPath.rawSegments[offset]
-  if (keySegment === undefined || rawSegment === undefined) {
+  if (rawSegment === undefined) {
     return false
   }
 
-  const staticChild = node.staticChildren.get(keySegment)
-  if (staticChild) {
-    if (lookupNode(staticChild, preparedPath, offset + 1, captures, options, onMatch)) {
-      return true
+  if (node.staticChildren.size > 0) {
+    const staticKey = options.caseSensitive ? rawSegment : rawSegment.toLowerCase()
+    const staticChild = node.staticChildren.get(staticKey)
+    if (staticChild) {
+      if (lookupNode(staticChild, preparedPath, offset + 1, captures, captureCount, options, onMatch)) {
+        return true
+      }
     }
   }
 
   if (node.paramChild) {
-    if (lookupNode(
-      node.paramChild,
-      preparedPath,
-      offset + 1,
-      [...captures, rawSegment],
-      options,
-      onMatch,
-    )) {
+    captures[captureCount] = rawSegment
+    if (lookupNode(node.paramChild, preparedPath, offset + 1, captures, captureCount + 1, options, onMatch)) {
       return true
     }
   }
 
   if (node.wildcardChild && node.wildcardChild.storeId !== null) {
-    const rest = preparedPath.rawSegments.slice(offset).join("/")
-    return finalizeLookup(node.wildcardChild, [...captures, rest], options, onMatch)
+    captures[captureCount] = preparedPath.rawSegments.slice(offset).join("/")
+    return finalizeLookup(node.wildcardChild, captures, captureCount + 1, options, onMatch)
+  }
+
+  return false
+}
+
+function matchesNodeInternal(
+  node: TrieNode,
+  preparedPath: PreparedPath,
+  offset: number,
+  captures: string[],
+  captureCount: number,
+  options: Required<RouterOptions>,
+): boolean {
+  if (offset === preparedPath.rawSegments.length) {
+    if (node.storeId !== null) {
+      return hasValidCaptures(node, captures, captureCount, options)
+    }
+
+    if (node.wildcardChild && node.wildcardChild.storeId !== null) {
+      captures[captureCount] = ""
+      return hasValidCaptures(node.wildcardChild, captures, captureCount + 1, options)
+    }
+
+    return false
+  }
+
+  const rawSegment = preparedPath.rawSegments[offset]
+  if (rawSegment === undefined) {
+    return false
+  }
+
+  if (node.staticChildren.size > 0) {
+    const staticKey = options.caseSensitive ? rawSegment : rawSegment.toLowerCase()
+    const staticChild = node.staticChildren.get(staticKey)
+    if (staticChild && matchesNodeInternal(staticChild, preparedPath, offset + 1, captures, captureCount, options)) {
+      return true
+    }
+  }
+
+  if (node.paramChild) {
+    captures[captureCount] = rawSegment
+    if (matchesNodeInternal(node.paramChild, preparedPath, offset + 1, captures, captureCount + 1, options)) {
+      return true
+    }
+  }
+
+  if (node.wildcardChild && node.wildcardChild.storeId !== null) {
+    captures[captureCount] = preparedPath.rawSegments.slice(offset).join("/")
+    return hasValidCaptures(node.wildcardChild, captures, captureCount + 1, options)
   }
 
   return false
@@ -94,6 +151,7 @@ export function lookupNode(
 function finalizeLookup(
   node: TrieNode,
   captures: string[],
+  captureCount: number,
   options: Required<RouterOptions>,
   onMatch: LookupHandler,
 ): boolean {
@@ -109,6 +167,10 @@ function finalizeLookup(
   if (names.length === 0) {
     onMatch(node.storeId, null, node.routePath)
     return true
+  }
+
+   if (captureCount !== names.length) {
+    return false
   }
 
   const params: Record<string, string> = {}
@@ -127,3 +189,29 @@ function finalizeLookup(
   onMatch(node.storeId, params, node.routePath)
   return true
 }
+
+function hasValidCaptures(
+  node: TrieNode,
+  captures: string[],
+  captureCount: number,
+  options: Required<RouterOptions>,
+): boolean {
+  if (node.storeId === null) {
+    return false
+  }
+
+  const namesCount = node.paramNames.length + (node.wildcardName ? 1 : 0)
+  if (namesCount !== captureCount) {
+    return false
+  }
+
+  for (let index = 0; index < namesCount; index++) {
+    const decoded = decodeSegment(captures[index] ?? "")
+    if (decoded === null || decoded.length > options.maxParamLength) {
+      return false
+    }
+  }
+
+  return true
+}
+

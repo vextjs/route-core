@@ -45,6 +45,7 @@ jobs:
         run: npm run bench
         env:
           ROUTE_CORE_BENCH_ITERATIONS: 10000
+          ROUTE_CORE_BENCH_ASSERT: 1
 
       - name: Runtime dependency check
         run: npm ls --omit=dev

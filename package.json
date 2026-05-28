@@ -1,7 +1,7 @@
 {
   "name": "route-core",
   "version": "0.0.2",
-  "description": "Ultra‑fast, minimal routing engine for Node.js. Built for hot paths.",
+  "description": "Minimal, zero-runtime-dependency routing engine for Node.js frameworks.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

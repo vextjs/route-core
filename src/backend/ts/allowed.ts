@@ -1,6 +1,6 @@
 import type { RouterOptions } from "../../types.js"
 import { type PreparedPath } from "./normalize.js"
-import { matchNode, type TrieNode } from "./trie.js"
+import { matchesNode, type TrieNode } from "./trie.js"
 
 export function findAllowedMethods(
   buckets: Map<string, TrieNode>,
@@ -15,7 +15,7 @@ export function findAllowedMethods(
       continue
     }
 
-    const match = matchNode(bucket, preparedPath, 0, [], options)
+    const match = matchesNode(bucket, preparedPath, 0, [], options)
     if (match) {
       methods.push(method)
     }

@@ -4,6 +4,8 @@
 
 It is designed for framework adapters that want a focused router core instead of a full HTTP dispatcher.
 
+Current releases prioritize routing semantics, adapter compatibility, and package surface stability first. Benchmark-driven throughput tuning is still in progress.
+
 - **Small public API**: `add`, `find`, `lookup`, and `allowed`.
 - **Framework-owned stores**: route-core stores ids and params only; your framework owns handlers, middleware, and metadata.
 - **Template-aware matching**: matches include `routePath`, which is useful for low-cardinality values such as `req.route`.
@@ -73,7 +75,7 @@ console.log(router.allowed('/users'))
 // ['GET', 'POST']
 ```
 
-Use `lookup()` when your adapter wants a direct callback on match:
+Use `lookup()` when your adapter prefers callback-style dispatch without allocating a `MatchResult` wrapper:
 
 ```js
 router.lookup('GET', '/users/42', (storeId, params, routePath) => {
@@ -149,7 +151,7 @@ interface MatchResult {
 
 ### `router.lookup(method, path, onMatch)`
 
-Looks up a route and calls the callback directly on hit. This is intended for adapter hot paths.
+Looks up a route and calls the callback directly on hit. This is intended for adapter integrations that prefer callback-style dispatch.
 
 ```ts
 router.lookup(
