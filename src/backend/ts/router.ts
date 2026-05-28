@@ -2,20 +2,24 @@ import { ANY_METHOD, BUILTIN_METHOD_ORDER, DEFAULT_OPTIONS } from "../../constan
 import { InvalidPathError, RouteConflictError } from "../../errors.js"
 import type { LookupHandler, MatchResult, Router, RouterOptions } from "../../types.js"
 import { assertStoreId } from "../../internal/assert.js"
-import { findAllowedMethods } from "./allowed.js"
+import { findAllowedMethodsCompiled } from "./allowed.js"
+import { compileRouterRuntime, type CompiledRouterRuntime } from "./compiler.js"
+import { createRouteDefinition, type RouteDefinition } from "./ir.js"
 import {
   normalizeMethod,
   normalizeRouteTemplate,
   parseRoutePath,
-  prepareMatchPath,
-  type PreparedPath,
+  prepareLookupPath,
 } from "./normalize.js"
-import { lookupNode, matchNode, TrieNode } from "./trie.js"
+import { TrieNode } from "./trie.js"
 
 export class RouteCoreRouter implements Router {
   private readonly buckets = new Map<string, TrieNode>()
   private readonly customMethodOrder: string[] = []
   private readonly options: Required<RouterOptions>
+  private readonly routes: RouteDefinition[] = []
+  private compiledRuntime: CompiledRouterRuntime | null = null
+  private dirty = true
 
   constructor(options: RouterOptions = {}) {
     this.options = {
@@ -76,21 +80,37 @@ export class RouteCoreRouter implements Router {
     node.routePath = routePath
     node.paramNames = paramNames
     node.wildcardName = wildcardName
+
+    this.routes.push(createRouteDefinition(
+      normalizedMethod,
+      routePath,
+      routeSegments,
+      storeId,
+    ))
+    this.dirty = true
   }
 
   find(method: string, path: string): MatchResult | null {
+    const runtime = this.ensureCompiled()
     const normalizedMethod = normalizeMethod(method)
-    const preparedPath = prepareMatchPath(path, this.options)
+    const preparedPath = prepareLookupPath(path, this.options)
     if (!preparedPath) {
       return null
     }
 
-    const directMatch = this.findInBucket(normalizedMethod, preparedPath)
-    if (directMatch || normalizedMethod === ANY_METHOD) {
-      return directMatch
+    const rawPathname = typeof preparedPath === "string" ? preparedPath : preparedPath.rawPathname
+    const matchPathname = typeof preparedPath === "string" ? preparedPath : preparedPath.matchPathname
+
+    const normalizedMatch = runtime.methods.get(normalizedMethod)?.find(
+      rawPathname,
+      matchPathname,
+    ) ?? null
+
+    if (normalizedMatch || normalizedMethod === ANY_METHOD) {
+      return normalizedMatch
     }
 
-    return this.findInBucket(ANY_METHOD, preparedPath)
+    return runtime.anyMethod?.find(rawPathname, matchPathname) ?? null
   }
 
   lookup(method: string, path: string, onMatch: LookupHandler): boolean {
@@ -98,13 +118,21 @@ export class RouteCoreRouter implements Router {
       throw new TypeError("onMatch must be a function")
     }
 
+    const runtime = this.ensureCompiled()
     const normalizedMethod = normalizeMethod(method)
-    const preparedPath = prepareMatchPath(path, this.options)
+    const preparedPath = prepareLookupPath(path, this.options)
     if (!preparedPath) {
       return false
     }
 
-    if (this.lookupInBucket(normalizedMethod, preparedPath, onMatch)) {
+    const rawPathname = typeof preparedPath === "string" ? preparedPath : preparedPath.rawPathname
+    const matchPathname = typeof preparedPath === "string" ? preparedPath : preparedPath.matchPathname
+
+    if (runtime.methods.get(normalizedMethod)?.lookup(
+      rawPathname,
+      matchPathname,
+      onMatch,
+    )) {
       return true
     }
 
@@ -112,16 +140,34 @@ export class RouteCoreRouter implements Router {
       return false
     }
 
-    return this.lookupInBucket(ANY_METHOD, preparedPath, onMatch)
+    return runtime.anyMethod?.lookup(
+      rawPathname,
+      matchPathname,
+      onMatch,
+    ) ?? false
   }
 
   allowed(path: string): string[] | null {
-    const preparedPath = prepareMatchPath(path, this.options)
+    const preparedPath = prepareLookupPath(path, this.options)
     if (!preparedPath) {
       return null
     }
 
-    return findAllowedMethods(this.buckets, this.methodScanOrder(), preparedPath, this.options)
+    return findAllowedMethodsCompiled(
+      this.ensureCompiled().methods,
+      this.methodScanOrder(),
+      preparedPath,
+    )
+  }
+
+  private ensureCompiled(): CompiledRouterRuntime {
+    if (!this.dirty && this.compiledRuntime) {
+      return this.compiledRuntime
+    }
+
+    this.compiledRuntime = compileRouterRuntime(this.routes, this.options.maxParamLength)
+    this.dirty = false
+    return this.compiledRuntime
   }
 
   private getOrCreateBucket(method: string): TrieNode {
@@ -135,28 +181,6 @@ export class RouteCoreRouter implements Router {
       }
     }
     return bucket
-  }
-
-  private findInBucket(method: string, preparedPath: PreparedPath): MatchResult | null {
-    const bucket = this.buckets.get(method)
-    if (!bucket) {
-      return null
-    }
-
-    return matchNode(bucket, preparedPath, 0, [], this.options)
-  }
-
-  private lookupInBucket(
-    method: string,
-    preparedPath: PreparedPath,
-    onMatch: LookupHandler,
-  ): boolean {
-    const bucket = this.buckets.get(method)
-    if (!bucket) {
-      return false
-    }
-
-    return lookupNode(bucket, preparedPath, 0, [], 0, this.options, onMatch)
   }
 
   private methodScanOrder(): string[] {

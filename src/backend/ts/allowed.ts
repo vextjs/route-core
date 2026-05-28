@@ -1,25 +1,25 @@
-import type { RouterOptions } from "../../types.js"
-import { type PreparedPath } from "./normalize.js"
-import { matchesNode, type TrieNode } from "./trie.js"
+import type { PreparedLookupPath } from "./normalize.js"
+import type { CompiledMethodRuntime } from "./compiler.js"
 
-export function findAllowedMethods(
-  buckets: Map<string, TrieNode>,
+export function findAllowedMethodsCompiled(
+  methods: Map<string, CompiledMethodRuntime>,
   methodOrder: string[],
-  preparedPath: PreparedPath,
-  options: Required<RouterOptions>,
+  preparedPath: PreparedLookupPath,
 ): string[] | null {
-  const methods: string[] = []
+  const allowed: string[] = []
+  const rawPathname = typeof preparedPath === "string" ? preparedPath : preparedPath.rawPathname
+  const matchPathname = typeof preparedPath === "string" ? preparedPath : preparedPath.matchPathname
+
   for (const method of methodOrder) {
-    const bucket = buckets.get(method)
-    if (!bucket) {
+    const runtime = methods.get(method)
+    if (!runtime) {
       continue
     }
 
-    const match = matchesNode(bucket, preparedPath, 0, [], options)
-    if (match) {
-      methods.push(method)
+    if (runtime.matches(rawPathname, matchPathname)) {
+      allowed.push(method)
     }
   }
 
-  return methods.length > 0 ? methods : null
+  return allowed.length > 0 ? allowed : null
 }

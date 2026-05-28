@@ -4,6 +4,8 @@ import { createRouter } from '../../dist/index.js'
 import { createFindMyWayRouter, find, lookup } from './find-my-way.mjs'
 
 const ITERATIONS = Number.parseInt(process.env.ROUTE_CORE_BENCH_ITERATIONS ?? '100000', 10)
+const ROUNDS = Number.parseInt(process.env.ROUTE_CORE_BENCH_ROUNDS ?? '1', 10)
+const WARMUP_ROUNDS = Number.parseInt(process.env.ROUTE_CORE_BENCH_WARMUP_ROUNDS ?? '2', 10)
 const ASSERT_BUDGET = process.env.ROUTE_CORE_BENCH_ASSERT === '1'
 const budget = ASSERT_BUDGET
   ? JSON.parse(readFileSync(new URL('./budget.json', import.meta.url), 'utf8'))
@@ -11,14 +13,32 @@ const budget = ASSERT_BUDGET
 const results = new Map()
 
 function bench(name, fn) {
-  const start = performance.now()
-  for (let index = 0; index < ITERATIONS; index++) {
-    fn(index)
+  const roundResults = []
+
+  for (let round = 0; round < WARMUP_ROUNDS; round++) {
+    for (let index = 0; index < ITERATIONS; index++) {
+      fn(index)
+    }
   }
-  const durationMs = performance.now() - start
-  const opsPerSecond = Math.round((ITERATIONS / durationMs) * 1000)
-  results.set(name, opsPerSecond)
-  console.log(`${name}: ${opsPerSecond.toLocaleString()} ops/sec (${durationMs.toFixed(2)} ms)`)
+
+  for (let round = 0; round < ROUNDS; round++) {
+    const start = performance.now()
+    for (let index = 0; index < ITERATIONS; index++) {
+      fn(index)
+    }
+    const durationMs = performance.now() - start
+    roundResults.push(Math.round((ITERATIONS / durationMs) * 1000))
+  }
+
+  const median = medianOf(roundResults)
+  results.set(name, median)
+  if (ROUNDS === 1) {
+    console.log(`${name}: ${median.toLocaleString()} ops/sec`)
+    return
+  }
+
+  const roundsLabel = roundResults.map((value) => value.toLocaleString()).join(', ')
+  console.log(`${name}: ${median.toLocaleString()} ops/sec (median of ${ROUNDS}: ${roundsLabel})`)
 }
 
 function createRouteCoreRouter() {
@@ -121,6 +141,15 @@ if (budget) {
     }
     process.exitCode = 1
   }
+}
+
+function medianOf(values) {
+  const sorted = [...values].sort((left, right) => left - right)
+  const middle = Math.floor(sorted.length / 2)
+  if (sorted.length % 2 === 1) {
+    return sorted[middle]
+  }
+  return Math.round((sorted[middle - 1] + sorted[middle]) / 2)
 }
 
 function noop() {}

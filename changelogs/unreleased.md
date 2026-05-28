@@ -6,4 +6,6 @@
 - Reduced router hot-path overhead by removing pre-match decode validation, reusing capture buffers during traversal, and using lightweight allowed-method matching.
 - Reduced request-path preprocessing allocations by removing `PreparedPath` key precomputation and calculating static match keys on demand during trie traversal.
 - Added a machine-enforced route-only benchmark budget and wired CI to fail when the committed perf floor regresses.
+- Replaced the request-time trie traversal hot path with a compiled matcher backend plus hybrid fallback, including common-case pathname fast paths and compiled prefix miss guards.
+- Extended the route-only benchmark with multi-round medians and warmup support, and recalibrated its regression budget around the stable rewritten runtime.
 - Corrected the `v0.0.2` changelog to match the current `docs/` file tree.
