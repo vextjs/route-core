@@ -16,11 +16,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node scripts/finalize-build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test test/router.test.mjs test/package-entry.test.mjs test/vext-compat.test.mjs",
+    "test": "npm run build && node --test test/router.test.mjs test/hot-router.test.mjs test/package-entry.test.mjs test/vext-compat.test.mjs",
     "test:shared": "npm run build && node --test test/router.test.mjs",
     "test:router": "npm run build && node --test test/router.test.mjs",
     "test:package": "npm run build && node --test test/package-entry.test.mjs",
-    "bench": "npm run build && node benchmark/route-only/index.mjs",
+    "bench": "npm run build && node benchmark/hot-path/index.mjs && node benchmark/route-only/index.mjs",
+    "bench:hot": "npm run build && node benchmark/hot-path/index.mjs",
+    "bench:compat": "npm run build && node benchmark/route-only/index.mjs",
     "prepublishOnly": "node scripts/prepublish-check.mjs"
   },
   "keywords": [],

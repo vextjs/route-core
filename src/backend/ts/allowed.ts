@@ -1,10 +1,10 @@
-import type { PreparedLookupPath } from "./normalize.js"
+import type { PreparedPathname } from "../../types.js"
 import type { CompiledMethodRuntime } from "./compiler.js"
 
 export function findAllowedMethodsCompiled(
   methods: Map<string, CompiledMethodRuntime>,
   methodOrder: string[],
-  preparedPath: PreparedLookupPath,
+  preparedPath: PreparedPathname,
 ): string[] | null {
   const allowed: string[] = []
   const rawPathname = typeof preparedPath === "string" ? preparedPath : preparedPath.rawPathname

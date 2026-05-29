@@ -4,9 +4,12 @@
 
 It is designed for framework adapters that want a focused router core instead of a full HTTP dispatcher.
 
-Current releases prioritize routing semantics, adapter compatibility, and package surface stability first. Benchmark-driven throughput tuning is still in progress.
+Current releases now expose two routing surfaces:
 
-- **Small public API**: `add`, `find`, `lookup`, and `allowed`.
+- **Compat API**: `add`, `find`, `lookup`, and `allowed` for framework-friendly integration.
+- **Hot API**: prepared method and prepared pathname helpers for adapters that want the thinnest possible JS hot path.
+
+- **Dual-surface API**: keep the compatibility facade, but expose a thinner fast path for adapter internals.
 - **Framework-owned stores**: route-core stores ids and params only; your framework owns handlers, middleware, and metadata.
 - **Template-aware matching**: matches include `routePath`, which is useful for low-cardinality values such as `req.route`.
 - **CJS, ESM, and TypeScript support**: the package exports CommonJS, ES module, and declaration entry points.
@@ -15,6 +18,7 @@ Current releases prioritize routing semantics, adapter compatibility, and packag
 
 - [Install](#install)
 - [Quick Start](#quick-start)
+- [Hot Path Quick Start](#hot-path-quick-start)
 - [API Reference](#api-reference)
   - [createRouter(options?)](#createrouteroptions)
   - [RouterOptions](#routeroptions)
@@ -22,6 +26,11 @@ Current releases prioritize routing semantics, adapter compatibility, and packag
   - [router.find(method, path)](#routerfindmethod-path)
   - [router.lookup(method, path, onMatch)](#routerlookupmethod-path-onmatch)
   - [router.allowed(path)](#routerallowedpath)
+  - [router.prepareMethod(method)](#routerpreparemethodmethod)
+  - [router.preparePathname(path)](#routerpreparepathnamepath)
+  - [router.findPrepared(method, pathname)](#routerfindpreparedmethod-pathname)
+  - [router.lookupPrepared(method, pathname, onMatch)](#routerlookuppreparedmethod-pathname-onmatch)
+  - [router.allowedPrepared(pathname)](#routerallowedpreparedpathname)
 - [404 vs 405](#404-vs-405)
 - [Route Syntax](#route-syntax)
   - [URL and Parameter Normalization](#url-and-parameter-normalization)
@@ -84,6 +93,39 @@ router.lookup('GET', '/users/42', (storeId, params, routePath) => {
   console.log(routePath) // '/users/:id'
 })
 ```
+
+## Hot Path Quick Start
+
+If your adapter already has a normalized `pathname`, prefer the prepared hot path:
+
+```js
+import { createRouter } from 'route-core'
+
+const router = createRouter()
+router.add('GET', '/users/:id', 1)
+
+const GET = router.prepareMethod('GET')
+
+console.log(GET.find('/users/42'))
+// { storeId: 1, params: { id: '42' }, routePath: '/users/:id' }
+
+GET.lookup('/users/42', (storeId, params, routePath) => {
+  console.log(storeId)   // 1
+  console.log(params)    // { id: '42' }
+  console.log(routePath) // '/users/:id'
+})
+```
+
+If your adapter still receives raw paths, you can normalize once and reuse the prepared value:
+
+```js
+const preparedPath = router.preparePathname('/Users/42?from=app')
+if (preparedPath) {
+  console.log(router.findPrepared(GET, preparedPath))
+}
+```
+
+Prepared method handles stay live across later `add()` calls. When the route table changes, route-core rebinds the prepared handle to the latest compiled runtime on the next lookup.
 
 ## API Reference
 
@@ -182,6 +224,77 @@ router.allowed(path: string): string[] | null
 | `string[]` | The path exists, but the current request method is not registered |
 
 Call `allowed()` only after `find()` returns `null`.
+
+### `router.prepareMethod(method)`
+
+Prepares a reusable hot-path method handle.
+
+```ts
+router.prepareMethod(method: string): PreparedMethod
+```
+
+```ts
+interface PreparedMethod {
+  name: string
+  find(pathname: PreparedPathname): MatchResult | null
+  lookup(pathname: PreparedPathname, onMatch: LookupHandler): boolean
+}
+```
+
+Use this when your adapter will perform many lookups with the same HTTP method.
+
+Prepared method handles remain valid after later `add()` calls. They automatically pick up newly compiled routes on the next lookup.
+
+### `router.preparePathname(path)`
+
+Normalizes a path once so it can be reused by the hot API.
+
+```ts
+router.preparePathname(path: string): PreparedPathname | null
+```
+
+```ts
+type PreparedPathname =
+  | string
+  | {
+      rawPathname: string
+      matchPathname: string
+    }
+```
+
+Common-case already-normalized lowercase ASCII paths usually return a plain string. Case-insensitive paths that need separate raw and match representations return the object form.
+
+### `router.findPrepared(method, pathname)`
+
+Calls the prepared hot path directly.
+
+```ts
+router.findPrepared(method: PreparedMethod, pathname: PreparedPathname): MatchResult | null
+```
+
+This is equivalent to `method.find(pathname)`.
+
+### `router.lookupPrepared(method, pathname, onMatch)`
+
+Calls the prepared hot lookup path directly.
+
+```ts
+router.lookupPrepared(
+  method: PreparedMethod,
+  pathname: PreparedPathname,
+  onMatch: LookupHandler,
+): boolean
+```
+
+This is equivalent to `method.lookup(pathname, onMatch)`.
+
+### `router.allowedPrepared(pathname)`
+
+Runs `allowed()` against a prepared pathname.
+
+```ts
+router.allowedPrepared(pathname: PreparedPathname): string[] | null
+```
 
 ## 404 vs 405
 
@@ -301,7 +414,14 @@ All public types are exported from the package root:
 
 ```ts
 import { createRouter } from 'route-core'
-import type { LookupHandler, MatchResult, Router, RouterOptions } from 'route-core'
+import type {
+  LookupHandler,
+  MatchResult,
+  PreparedMethod,
+  PreparedPathname,
+  Router,
+  RouterOptions,
+} from 'route-core'
 
 const router: Router = createRouter({ caseSensitive: true })
 ```

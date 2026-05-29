@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { performance } from 'node:perf_hooks'
 import { createRouter } from '../../dist/index.js'
-import { createFindMyWayRouter, find, lookup } from './find-my-way.mjs'
+import { createFindMyWayRouter, find, lookup } from '../route-only/find-my-way.mjs'
 
 const ITERATIONS = Number.parseInt(process.env.ROUTE_CORE_BENCH_ITERATIONS ?? '100000', 10)
 const ROUNDS = Number.parseInt(process.env.ROUTE_CORE_BENCH_ROUNDS ?? '1', 10)
@@ -32,6 +32,7 @@ function bench(name, fn) {
 
   const median = medianOf(roundResults)
   results.set(name, median)
+
   if (ROUNDS === 1) {
     console.log(`${name}: ${median.toLocaleString()} ops/sec`)
     return
@@ -52,6 +53,7 @@ function createRouteCoreRouter() {
 }
 
 const routeCore = createRouteCoreRouter()
+const get = routeCore.prepareMethod('GET')
 const findMyWayLookup = createFindMyWayRouter()
 const findMyWayFind = createFindMyWayRouter()
 
@@ -63,12 +65,12 @@ bench('find-my-way find static', (index) => {
   find(findMyWayFind, 'GET', `/static/${index % 1000}`)
 })
 
-bench('route-core static', (index) => {
-  routeCore.find('GET', `/static/${index % 1000}`)
+bench('route-core hot static', (index) => {
+  get.find(`/static/${index % 1000}`)
 })
 
-bench('route-core lookup static', (index) => {
-  routeCore.lookup('GET', `/static/${index % 1000}`, noop)
+bench('route-core hot lookup static', (index) => {
+  get.lookup(`/static/${index % 1000}`, noop)
 })
 
 bench('find-my-way lookup params', (index) => {
@@ -79,12 +81,12 @@ bench('find-my-way find params', (index) => {
   find(findMyWayFind, 'GET', `/users/${index % 1000}/abc`)
 })
 
-bench('route-core params', (index) => {
-  routeCore.find('GET', `/users/${index % 1000}/abc`)
+bench('route-core hot params', (index) => {
+  get.find(`/users/${index % 1000}/abc`)
 })
 
-bench('route-core lookup params', (index) => {
-  routeCore.lookup('GET', `/users/${index % 1000}/abc`, noop)
+bench('route-core hot lookup params', (index) => {
+  get.lookup(`/users/${index % 1000}/abc`, noop)
 })
 
 bench('find-my-way lookup wildcard', (index) => {
@@ -95,12 +97,12 @@ bench('find-my-way find wildcard', (index) => {
   find(findMyWayFind, 'GET', `/assets/js/${index}/app.js`)
 })
 
-bench('route-core wildcard', (index) => {
-  routeCore.find('GET', `/assets/js/${index}/app.js`)
+bench('route-core hot wildcard', (index) => {
+  get.find(`/assets/js/${index}/app.js`)
 })
 
-bench('route-core lookup wildcard', (index) => {
-  routeCore.lookup('GET', `/assets/js/${index}/app.js`, noop)
+bench('route-core hot lookup wildcard', (index) => {
+  get.lookup(`/assets/js/${index}/app.js`, noop)
 })
 
 bench('find-my-way lookup miss', (index) => {
@@ -111,12 +113,12 @@ bench('find-my-way find miss', (index) => {
   find(findMyWayFind, 'GET', `/missing/${index}`)
 })
 
-bench('route-core miss', (index) => {
-  routeCore.find('GET', `/missing/${index}`)
+bench('route-core hot miss', (index) => {
+  get.find(`/missing/${index}`)
 })
 
-bench('route-core lookup miss', (index) => {
-  routeCore.lookup('GET', `/missing/${index}`, noop)
+bench('route-core hot lookup miss', (index) => {
+  get.lookup(`/missing/${index}`, noop)
 })
 
 if (budget) {

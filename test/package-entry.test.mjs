@@ -10,6 +10,7 @@ describe('package entries', () => {
     assert.equal(typeof mod.createRouter, 'function')
     assert.equal('default' in mod, false)
     assert.equal(typeof mod.createRouter().lookup, 'function')
+    assert.equal(typeof mod.createRouter().prepareMethod, 'function')
   })
 
   it('supports CJS named exports', () => {
@@ -17,5 +18,6 @@ describe('package entries', () => {
     assert.equal(typeof mod.createRouter, 'function')
     assert.equal(typeof mod.RouteConflictError, 'function')
     assert.equal(typeof mod.createRouter().lookup, 'function')
+    assert.equal(typeof mod.createRouter().prepareMethod, 'function')
   })
 })

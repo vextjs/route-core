@@ -17,9 +17,27 @@ export type LookupHandler = (
   routePath: string,
 ) => void
 
+export type PreparedPathname =
+  | string
+  | {
+    rawPathname: string
+    matchPathname: string
+  }
+
+export interface PreparedMethod {
+  readonly name: string
+  find(pathname: PreparedPathname): MatchResult | null
+  lookup(pathname: PreparedPathname, onMatch: LookupHandler): boolean
+}
+
 export interface Router {
   add(method: string, path: string, storeId: number): void
   find(method: string, path: string): MatchResult | null
   lookup(method: string, path: string, onMatch: LookupHandler): boolean
   allowed(path: string): string[] | null
+  prepareMethod(method: string): PreparedMethod
+  preparePathname(path: string): PreparedPathname | null
+  findPrepared(method: PreparedMethod, pathname: PreparedPathname): MatchResult | null
+  lookupPrepared(method: PreparedMethod, pathname: PreparedPathname, onMatch: LookupHandler): boolean
+  allowedPrepared(pathname: PreparedPathname): string[] | null
 }

@@ -9,3 +9,5 @@
 - Replaced the request-time trie traversal hot path with a compiled matcher backend plus hybrid fallback, including common-case pathname fast paths and compiled prefix miss guards.
 - Extended the route-only benchmark with multi-round medians and warmup support, and recalibrated its regression budget around the stable rewritten runtime.
 - Corrected the `v0.0.2` changelog to match the current `docs/` file tree.
+- Added a prepared hot-path API (`prepareMethod`, `preparePathname`, `findPrepared`, `lookupPrepared`, `allowedPrepared`) and a dedicated hot benchmark so adapters can bypass most compat-facade overhead.
+- Made prepared method handles stay live across later `add()` calls, and expanded the Chinese guide to document the same public contract as the English README.
