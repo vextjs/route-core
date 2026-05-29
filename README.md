@@ -467,6 +467,7 @@ interface PreparedMethod {
 Use this when your adapter will perform many lookups with the same HTTP method.
 
 Prepared method handles remain valid after later `add()` calls. They automatically pick up newly compiled routes on the next lookup.
+When you call `router.findPrepared()` or `router.lookupPrepared()`, the method handle must come from the same router instance that created it.
 
 ### `router.preparePathname(path)`
 
@@ -486,6 +487,7 @@ type PreparedPathname =
 ```
 
 Common-case already-normalized lowercase ASCII paths usually return a plain string. Case-insensitive paths that need separate raw and match representations return the object form.
+The prepared APIs also accept raw string pathnames and normalize them with the same rules as `find()`, `lookup()`, and `allowed()`, but `preparePathname()` remains the preferred hot-path form when you want to reuse the normalized value.
 
 ### `router.findPrepared(method, pathname)`
 
@@ -496,6 +498,7 @@ router.findPrepared(method: PreparedMethod, pathname: PreparedPathname): MatchRe
 ```
 
 This is equivalent to `method.find(pathname)`.
+The `method` handle must come from the same router instance. Passing a prepared method from another router throws `TypeError`.
 
 ### `router.lookupPrepared(method, pathname, onMatch)`
 
@@ -518,6 +521,8 @@ Runs `allowed()` against a prepared pathname.
 ```ts
 router.allowedPrepared(pathname: PreparedPathname): string[] | null
 ```
+
+When `pathname` is a raw string, route-core normalizes it with the same rules as `allowed()` before matching.
 
 ## 404 vs 405
 
@@ -740,6 +745,7 @@ const {
 
 ## Changelog
 
+- [v0.0.4](changelogs/v0.0.4.md)
 - [v0.0.3](changelogs/v0.0.3.md)
 - [v0.0.2](changelogs/v0.0.2.md)
 - [Unreleased](changelogs/unreleased.md)

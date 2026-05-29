@@ -7,8 +7,9 @@ const ITERATIONS = Number.parseInt(process.env.ROUTE_CORE_BENCH_ITERATIONS ?? '1
 const ROUNDS = Number.parseInt(process.env.ROUTE_CORE_BENCH_ROUNDS ?? '1', 10)
 const WARMUP_ROUNDS = Number.parseInt(process.env.ROUTE_CORE_BENCH_WARMUP_ROUNDS ?? '2', 10)
 const ASSERT_BUDGET = process.env.ROUTE_CORE_BENCH_ASSERT === '1'
+const budgetPath = process.env.ROUTE_CORE_BENCH_BUDGET_PATH ?? './budget.json'
 const budget = ASSERT_BUDGET
-  ? JSON.parse(readFileSync(new URL('./budget.json', import.meta.url), 'utf8'))
+  ? JSON.parse(readFileSync(new URL(budgetPath, import.meta.url), 'utf8'))
   : null
 const results = new Map()
 

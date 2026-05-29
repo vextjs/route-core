@@ -471,6 +471,7 @@ interface PreparedMethod {
 当你的适配层会对同一个 HTTP method 做大量 lookup 时，优先使用它。
 
 prepared method handle 在后续 `add()` 之后仍然有效；它会在下一次 lookup 时自动切到最新 compiled runtime。
+当你调用 `router.findPrepared()` 或 `router.lookupPrepared()` 时，`method` handle 必须来自同一个 router 实例。
 
 ### `router.preparePathname(path)`
 
@@ -490,6 +491,7 @@ type PreparedPathname =
 ```
 
 常见的已规范化、小写 ASCII 路径通常会返回纯字符串；在大小写不敏感模式下，如果既要保留原始参数大小写、又要使用小写路径参与匹配，则会返回对象形态。
+prepared API 也接受原始字符串 pathname，并按 `find()` / `lookup()` / `allowed()` 相同的规则做规范化；但如果你想复用规范化结果、压低热路径开销，仍应优先传入 `preparePathname()` 的返回值。
 
 ### `router.findPrepared(method, pathname)`
 
@@ -500,6 +502,7 @@ router.findPrepared(method: PreparedMethod, pathname: PreparedPathname): MatchRe
 ```
 
 它等价于 `method.find(pathname)`。
+`method` handle 必须来自同一个 router 实例；如果把其他 router 创建的 prepared method 传进来，会抛出 `TypeError`。
 
 ### `router.lookupPrepared(method, pathname, onMatch)`
 
@@ -522,6 +525,8 @@ router.lookupPrepared(
 ```ts
 router.allowedPrepared(pathname: PreparedPathname): string[] | null
 ```
+
+当 `pathname` 是原始字符串时，route-core 会先按 `allowed()` 相同的规则规范化后再匹配。
 
 ## 404 与 405
 
@@ -748,6 +753,7 @@ const {
 
 ## 变更日志
 
+- [v0.0.4](../changelogs/v0.0.4.md)
 - [v0.0.3](../changelogs/v0.0.3.md)
 - [v0.0.2](../changelogs/v0.0.2.md)
 - [Unreleased](../changelogs/unreleased.md)

@@ -49,6 +49,39 @@ test('preparePathname preserves raw params for case-insensitive routers', () => 
   })
 })
 
+test('prepared APIs normalize raw string pathnames with the standard router rules', () => {
+  const router = createRouter({ caseSensitive: false })
+  router.add('GET', '/users/:id', 1)
+  router.add('GET', '/health', 2)
+  router.add('POST', '/health', 3)
+
+  const get = router.prepareMethod('GET')
+
+  assert.deepEqual(get.find('/Users/AbC/?from=app#section'), {
+    storeId: 1,
+    params: { id: 'AbC' },
+    routePath: '/users/:id',
+  })
+
+  assert.deepEqual(router.findPrepared(get, '/Users/AbC/?from=app#section'), {
+    storeId: 1,
+    params: { id: 'AbC' },
+    routePath: '/users/:id',
+  })
+
+  let lookupResult = null
+  assert.equal(router.lookupPrepared(get, '/Users/AbC/?from=app#section', (storeId, params, routePath) => {
+    lookupResult = { storeId, params, routePath }
+  }), true)
+  assert.deepEqual(lookupResult, {
+    storeId: 1,
+    params: { id: 'AbC' },
+    routePath: '/users/:id',
+  })
+
+  assert.deepEqual(router.allowedPrepared('/Health/?from=app#section'), ['GET', 'POST'])
+})
+
 test('allowedPrepared reuses prepared path input', () => {
   const router = createRouter()
   router.add('GET', '/health', 1)
@@ -56,6 +89,31 @@ test('allowedPrepared reuses prepared path input', () => {
   router.add('ANY', '/health', 3)
 
   assert.deepEqual(router.allowedPrepared('/health'), ['GET', 'POST'])
+})
+
+test('router prepared wrappers reject method handles from another router instance', () => {
+  const routerA = createRouter()
+  routerA.add('GET', '/a', 1)
+
+  const routerB = createRouter()
+  routerB.add('GET', '/b', 2)
+
+  const getFromA = routerA.prepareMethod('GET')
+
+  assert.deepEqual(getFromA.find('/a'), {
+    storeId: 1,
+    params: null,
+    routePath: '/a',
+  })
+
+  assert.throws(
+    () => routerB.findPrepared(getFromA, '/a'),
+    /same router instance/,
+  )
+  assert.throws(
+    () => routerB.lookupPrepared(getFromA, '/a', () => {}),
+    /same router instance/,
+  )
 })
 
 test('prepared method handles stay live after add()', () => {

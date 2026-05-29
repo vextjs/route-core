@@ -41,11 +41,8 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Benchmark smoke
-        run: npm run bench
-        env:
-          ROUTE_CORE_BENCH_ITERATIONS: 10000
-          ROUTE_CORE_BENCH_ASSERT: 1
+      - name: Benchmark gate
+        run: npm run bench:gate
 
       - name: Runtime dependency check
         run: npm ls --omit=dev
