@@ -748,6 +748,7 @@ const {
 
 ## 变更日志
 
+- [v0.0.3](../changelogs/v0.0.3.md)
 - [v0.0.2](../changelogs/v0.0.2.md)
 - [Unreleased](../changelogs/unreleased.md)
 

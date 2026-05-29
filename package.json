@@ -1,6 +1,6 @@
 {
   "name": "route-core",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Minimal, zero-runtime-dependency routing engine for Node.js frameworks.",
   "type": "module",
   "main": "./dist/index.cjs",
