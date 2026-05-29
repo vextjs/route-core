@@ -1,7 +1,15 @@
 import FindMyWay from 'find-my-way'
 
-export function createFindMyWayRouter() {
+export function createFindMyWayRouter(options = {}) {
   const router = FindMyWay()
+  if (options.advanced === true) {
+    for (let index = 0; index < 1000; index++) {
+      router.on('GET', `/assets/${index}/:name.:ext`, noop)
+      router.on('GET', `/reports/${index}/:id(^\\d+).json`, noop)
+    }
+    return router
+  }
+
   for (let index = 0; index < 1000; index++) {
     router.on('GET', `/static/${index}`, noop)
     router.on('GET', `/users/${index}/:id`, noop)

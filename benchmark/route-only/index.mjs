@@ -51,9 +51,21 @@ function createRouteCoreRouter() {
   return router
 }
 
+function createAdvancedRouteCoreRouter() {
+  const router = createRouter()
+  for (let index = 0; index < 1000; index++) {
+    router.add('GET', `/assets/${index}/:name.:ext`, 2000 + index)
+    router.add('GET', `/reports/${index}/:id(^\\d+).json`, 3000 + index)
+  }
+  return router
+}
+
 const routeCore = createRouteCoreRouter()
+const routeCoreAdvanced = createAdvancedRouteCoreRouter()
 const findMyWayLookup = createFindMyWayRouter()
 const findMyWayFind = createFindMyWayRouter()
+const findMyWayAdvancedLookup = createFindMyWayRouter({ advanced: true })
+const findMyWayAdvancedFind = createFindMyWayRouter({ advanced: true })
 
 bench('find-my-way lookup static', (index) => {
   lookup(findMyWayLookup, 'GET', `/static/${index % 1000}`)
@@ -85,6 +97,38 @@ bench('route-core params', (index) => {
 
 bench('route-core lookup params', (index) => {
   routeCore.lookup('GET', `/users/${index % 1000}/abc`, noop)
+})
+
+bench('find-my-way lookup mixed', (index) => {
+  lookup(findMyWayAdvancedLookup, 'GET', `/assets/${index % 1000}/app.js`)
+})
+
+bench('find-my-way find mixed', (index) => {
+  find(findMyWayAdvancedFind, 'GET', `/assets/${index % 1000}/app.js`)
+})
+
+bench('route-core mixed', (index) => {
+  routeCoreAdvanced.find('GET', `/assets/${index % 1000}/app.js`)
+})
+
+bench('route-core lookup mixed', (index) => {
+  routeCoreAdvanced.lookup('GET', `/assets/${index % 1000}/app.js`, noop)
+})
+
+bench('find-my-way lookup regex', (index) => {
+  lookup(findMyWayAdvancedLookup, 'GET', `/reports/${index % 1000}/123.json`)
+})
+
+bench('find-my-way find regex', (index) => {
+  find(findMyWayAdvancedFind, 'GET', `/reports/${index % 1000}/123.json`)
+})
+
+bench('route-core regex', (index) => {
+  routeCoreAdvanced.find('GET', `/reports/${index % 1000}/123.json`)
+})
+
+bench('route-core lookup regex', (index) => {
+  routeCoreAdvanced.lookup('GET', `/reports/${index % 1000}/123.json`, noop)
 })
 
 bench('find-my-way lookup wildcard', (index) => {

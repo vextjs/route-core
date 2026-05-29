@@ -15,14 +15,20 @@ import {
   type CompiledMethodRuntime,
   type CompiledRouterRuntime,
 } from "./compiler.js"
-import { createRouteDefinition, type RouteDefinition } from "./ir.js"
+import {
+  createRouteDefinition,
+  getExactStaticPath,
+  isExactStaticRoute,
+  type RouteDefinition,
+} from "./ir.js"
 import {
   normalizeMethod,
   normalizeRouteTemplate,
+  type ParsedSegment,
   parseRoutePath,
   prepareLookupPath,
+  type Segment,
 } from "./normalize.js"
-import { TrieNode } from "./trie.js"
 
 type PreparedMethodBinding = {
   version: number
@@ -91,7 +97,6 @@ class PreparedMethodHandle implements PreparedMethod {
 }
 
 export class RouteCoreRouter implements Router {
-  private readonly buckets = new Map<string, TrieNode>()
   private readonly customMethodOrder: string[] = []
   private readonly options: Required<RouterOptions>
   private readonly routes: RouteDefinition[] = []
@@ -117,54 +122,16 @@ export class RouteCoreRouter implements Router {
     const routePath = normalizeRouteTemplate(path, this.options)
     const routeSegments = parseRoutePath(path, this.options)
     assertStoreId(storeId)
+    this.registerMethodOrder(normalizedMethod)
 
-    const bucket = this.getOrCreateBucket(normalizedMethod)
-    let node = bucket
-    const paramNames: string[] = []
-    let wildcardName: string | null = null
-
-    for (const segment of routeSegments) {
-      if (segment.kind === "static") {
-        let child = node.staticChildren.get(segment.key)
-        if (!child) {
-          child = new TrieNode()
-          node.staticChildren.set(segment.key, child)
-        }
-        node = child
-        continue
-      }
-
-      if (segment.kind === "param") {
-        if (!node.paramChild) {
-          node.paramChild = new TrieNode()
-        }
-        paramNames.push(segment.name)
-        node = node.paramChild
-        continue
-      }
-
-      if (!node.wildcardChild) {
-        node.wildcardChild = new TrieNode()
-      }
-      wildcardName = segment.name
-      node = node.wildcardChild
-    }
-
-    if (node.storeId !== null) {
-      throw new RouteConflictError()
-    }
-
-    node.storeId = storeId
-    node.routePath = routePath
-    node.paramNames = paramNames
-    node.wildcardName = wildcardName
-
-    this.routes.push(createRouteDefinition(
+    const routeDefinitions = createRouteDefinitions(
       normalizedMethod,
       routePath,
       routeSegments,
       storeId,
-    ))
+    )
+    assertNoRouteConflicts(this.routes, routeDefinitions)
+    this.routes.push(...routeDefinitions)
     this.dirty = true
   }
 
@@ -244,17 +211,10 @@ export class RouteCoreRouter implements Router {
     return this.compiledRuntime
   }
 
-  private getOrCreateBucket(method: string): TrieNode {
-    let bucket = this.buckets.get(method)
-    if (!bucket) {
-      bucket = new TrieNode()
-      this.buckets.set(method, bucket)
-
-      if (method !== ANY_METHOD && !BUILTIN_METHOD_ORDER.includes(method)) {
-        this.customMethodOrder.push(method)
-      }
+  private registerMethodOrder(method: string): void {
+    if (method !== ANY_METHOD && !BUILTIN_METHOD_ORDER.includes(method) && !this.customMethodOrder.includes(method)) {
+      this.customMethodOrder.push(method)
     }
-    return bucket
   }
 
   private methodScanOrder(): string[] {
@@ -331,4 +291,149 @@ function resolvePreparedPathname(pathname: PreparedPathname): {
   }
 
   return pathname
+}
+
+type ExpandedRouteVariant = {
+  segments: Segment[]
+  priority: number
+  allowExactStaticOverlap: boolean
+}
+
+function createRouteDefinitions(
+  method: string,
+  routePath: string,
+  parsedSegments: ParsedSegment[],
+  storeId: number,
+): RouteDefinition[] {
+  return expandParsedSegments(parsedSegments).map((variant) => createRouteDefinition(
+    method,
+    routePath,
+    variant.segments,
+    storeId,
+    {
+      priority: variant.priority,
+      allowExactStaticOverlap: variant.allowExactStaticOverlap,
+    },
+  ))
+}
+
+function expandParsedSegments(parsedSegments: ParsedSegment[]): ExpandedRouteVariant[] {
+  const tail = parsedSegments[parsedSegments.length - 1]
+  if (tail?.kind !== "optional-param") {
+    return [{
+      segments: parsedSegments as Segment[],
+      priority: 1,
+      allowExactStaticOverlap: false,
+    }]
+  }
+
+  const headSegments = parsedSegments.slice(0, -1) as Segment[]
+  return [
+    {
+      segments: headSegments,
+      priority: 0,
+      allowExactStaticOverlap: true,
+    },
+    {
+      segments: [...headSegments, { kind: "param", name: tail.name }],
+      priority: 1,
+      allowExactStaticOverlap: false,
+    },
+  ]
+}
+
+function assertNoRouteConflicts(
+  existingRoutes: readonly RouteDefinition[],
+  newRoutes: readonly RouteDefinition[],
+): void {
+  const newMethods = new Set(newRoutes.map((route) => route.method))
+  const existingByMethod = new Map<string, RouteDefinition[]>()
+
+  for (const route of existingRoutes) {
+    if (!newMethods.has(route.method)) {
+      continue
+    }
+    const bucket = existingByMethod.get(route.method)
+    if (bucket) {
+      bucket.push(route)
+    } else {
+      existingByMethod.set(route.method, [route])
+    }
+  }
+
+  for (const route of newRoutes) {
+    const existing = existingByMethod.get(route.method) ?? []
+    for (const candidate of existing) {
+      if (routesConflict(candidate, route)) {
+        throw new RouteConflictError()
+      }
+    }
+  }
+
+  for (let index = 0; index < newRoutes.length; index++) {
+    for (let compareIndex = index + 1; compareIndex < newRoutes.length; compareIndex++) {
+      if (routesConflict(newRoutes[index]!, newRoutes[compareIndex]!)) {
+        throw new RouteConflictError()
+      }
+    }
+  }
+}
+
+function routesConflict(left: RouteDefinition, right: RouteDefinition): boolean {
+  if (left.method !== right.method) {
+    return false
+  }
+
+  if (!sameRouteShape(left.segments, right.segments)) {
+    return false
+  }
+
+  if (canCoexistAsOptionalStaticOverlap(left, right)) {
+    return false
+  }
+
+  return true
+}
+
+function sameRouteShape(left: readonly Segment[], right: readonly Segment[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  for (let index = 0; index < left.length; index++) {
+    const leftSegment = left[index]!
+    const rightSegment = right[index]!
+    if (segmentConflictKey(leftSegment) !== segmentConflictKey(rightSegment)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+function segmentConflictKey(segment: Segment): string {
+  switch (segment.kind) {
+    case "static":
+      return `static:${segment.key}`
+    case "param":
+      return "param"
+    case "pattern":
+      return `pattern:${segment.signature}`
+    case "wildcard":
+      return "wildcard"
+    default:
+      return "unknown"
+  }
+}
+
+function canCoexistAsOptionalStaticOverlap(left: RouteDefinition, right: RouteDefinition): boolean {
+  if (!isExactStaticRoute(left) || !isExactStaticRoute(right)) {
+    return false
+  }
+
+  if (left.allowExactStaticOverlap === right.allowExactStaticOverlap) {
+    return false
+  }
+
+  return getExactStaticPath(left) === getExactStaticPath(right)
 }

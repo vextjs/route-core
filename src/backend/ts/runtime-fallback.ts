@@ -7,6 +7,8 @@ import {
   getCaptureNames,
   getExactStaticPath,
   getRootStaticSegment,
+  getTrailingWildcardSegmentCount,
+  hasPatternSegments,
 } from "./ir.js"
 
 export type RuntimeFindFn = (rawPath: string, matchPath: string) => MatchResult | null
@@ -66,13 +68,15 @@ export function createDynamicScannerRuntime(
   routes: RouteDefinition[],
   maxParamLength: number,
 ): RuntimeFallbackResult {
+  const hasPatternRoutes = routes.some(hasPatternSegments)
+  const segmentCountGuard = createSegmentCountGuard(routes)
   const trailingParamGroupsByRoot = new Map<string, Map<string, TrailingParamGroup>>()
   const trailingWildcardRoutesByRoot = new Map<string, TrailingWildcardRoute[]>()
   const rootlessTrailingWildcardRoutes: TrailingWildcardRoute[] = []
   const remainingRoutes: RouteDefinition[] = []
 
   for (const route of routes) {
-    if (isGroupedTrailingParamRoute(route)) {
+    if (!hasPatternRoutes && isGroupedTrailingParamRoute(route)) {
       const rootKey = getRootStaticSegment(route)
       if (!rootKey) {
         remainingRoutes.push(route)
@@ -143,6 +147,7 @@ export function createDynamicScannerRuntime(
     trailingParamGroupBuckets.set(rootKey, groups)
   }
   const trieRootStaticKeys = new Set(trie.staticChildren.keys())
+  const hasRootPatternChild = trie.patternChildren.length > 0
   const hasRootParamChild = trie.paramChild !== null
   const hasRootWildcardRoute = trie.wildcardRoute !== null
   const specializedRuntime = !hasTrieRoutes && rootlessTrailingWildcardRoutes.length === 0
@@ -155,11 +160,16 @@ export function createDynamicScannerRuntime(
 
   return {
     find(rawPath, matchPath) {
+      if (!matchesSegmentCountGuard(matchPath, segmentCountGuard)) {
+        return null
+      }
+
       const rootKey = getPathRootKey(matchPath)
       const trailingParamGroups = rootKey ? trailingParamGroupBuckets.get(rootKey) ?? null : null
       const trailingWildcardRoutes = rootKey ? trailingWildcardRoutesByRoot.get(rootKey) ?? [] : []
       const trieCanMatchRoot = hasTrieRoutes && (
-        hasRootParamChild
+        hasRootPatternChild
+        || hasRootParamChild
         || hasRootWildcardRoute
         || (rootKey !== null && trieRootStaticKeys.has(rootKey))
       )
@@ -205,11 +215,16 @@ export function createDynamicScannerRuntime(
       )
     },
     lookup(rawPath, matchPath, onMatch) {
+      if (!matchesSegmentCountGuard(matchPath, segmentCountGuard)) {
+        return false
+      }
+
       const rootKey = getPathRootKey(matchPath)
       const trailingParamGroups = rootKey ? trailingParamGroupBuckets.get(rootKey) ?? null : null
       const trailingWildcardRoutes = rootKey ? trailingWildcardRoutesByRoot.get(rootKey) ?? [] : []
       const trieCanMatchRoot = hasTrieRoutes && (
-        hasRootParamChild
+        hasRootPatternChild
+        || hasRootParamChild
         || hasRootWildcardRoute
         || (rootKey !== null && trieRootStaticKeys.has(rootKey))
       )
@@ -255,6 +270,75 @@ export function createDynamicScannerRuntime(
       )
     },
   }
+}
+
+type SegmentCountGuard = {
+  exactCounts: Set<number> | null
+  openEndedMinCount: number | null
+}
+
+function createSegmentCountGuard(routes: readonly RouteDefinition[]): SegmentCountGuard | null {
+  let openEndedMinCount: number | null = null
+  const exactCounts = new Set<number>()
+
+  for (const route of routes) {
+    const tail = route.segments[route.segments.length - 1]
+    if (tail?.kind === "wildcard" && tail.segmentCount === null) {
+      const minCount = route.segments.length - 1
+      openEndedMinCount = openEndedMinCount === null ? minCount : Math.min(openEndedMinCount, minCount)
+      continue
+    }
+
+    if (tail?.kind === "wildcard" && tail.segmentCount !== null) {
+      exactCounts.add((route.segments.length - 1) + tail.segmentCount)
+      continue
+    }
+
+    exactCounts.add(route.segments.length)
+  }
+
+  if (exactCounts.size === 0 && openEndedMinCount === null) {
+    return null
+  }
+
+  return {
+    exactCounts: exactCounts.size > 0 ? exactCounts : null,
+    openEndedMinCount,
+  }
+}
+
+function matchesSegmentCountGuard(
+  path: string,
+  guard: SegmentCountGuard | null,
+): boolean {
+  if (!guard) {
+    return true
+  }
+
+  const segmentCount = countSegmentsInPath(path)
+  if (guard.exactCounts?.has(segmentCount)) {
+    return true
+  }
+
+  if (guard.openEndedMinCount === null) {
+    return false
+  }
+
+  return segmentCount >= guard.openEndedMinCount
+}
+
+function countSegmentsInPath(path: string): number {
+  if (path.length <= 1) {
+    return 0
+  }
+
+  let count = 1
+  for (let index = 1; index < path.length; index++) {
+    if (path.charCodeAt(index) === 47) {
+      count += 1
+    }
+  }
+  return count
 }
 
 function createSpecializedGroupedRuntime(
@@ -476,6 +560,38 @@ function findInNode(
     }
   }
 
+  if (node.patternChildren.length > 0) {
+    for (const patternChild of node.patternChildren) {
+      const patternCaptures = matchPatternSegment(
+        patternChild.segment,
+        rawPath,
+        matchPath,
+        index,
+        end,
+        maxParamLength,
+      )
+      if (!patternCaptures) {
+        continue
+      }
+
+      for (const capture of patternCaptures) {
+        captures.push(capture)
+      }
+      const patternResult = findInNode(
+        patternChild.node,
+        rawPath,
+        matchPath,
+        nextIndex,
+        captures,
+        maxParamLength,
+      )
+      captures.length -= patternCaptures.length
+      if (patternResult) {
+        return patternResult
+      }
+    }
+  }
+
   if (node.paramChild) {
     captures.push([index, end])
     const paramResult = findInNode(node.paramChild, rawPath, matchPath, nextIndex, captures, maxParamLength)
@@ -525,6 +641,39 @@ function lookupInNode(
     return true
   }
 
+  if (node.patternChildren.length > 0) {
+    for (const patternChild of node.patternChildren) {
+      const patternCaptures = matchPatternSegment(
+        patternChild.segment,
+        rawPath,
+        matchPath,
+        index,
+        end,
+        maxParamLength,
+      )
+      if (!patternCaptures) {
+        continue
+      }
+
+      for (const capture of patternCaptures) {
+        captures.push(capture)
+      }
+      const matched = lookupInNode(
+        patternChild.node,
+        rawPath,
+        matchPath,
+        nextIndex,
+        captures,
+        maxParamLength,
+        onMatch,
+      )
+      captures.length -= patternCaptures.length
+      if (matched) {
+        return true
+      }
+    }
+  }
+
   if (node.paramChild) {
     captures.push([index, end])
     const matched = lookupInNode(node.paramChild, rawPath, matchPath, nextIndex, captures, maxParamLength, onMatch)
@@ -544,12 +693,67 @@ function lookupInNode(
   return false
 }
 
+function matchPatternSegment(
+  segment: Extract<RouteDefinition["segments"][number], { kind: "pattern" }>,
+  rawPath: string,
+  matchPath: string,
+  start: number,
+  end: number,
+  maxParamLength: number,
+): Array<[number, number]> | null {
+  const localSegment = matchPath.slice(start, end)
+  const match = segment.matcher.exec(localSegment)
+  if (!match?.groups) {
+    return null
+  }
+
+  const captures: Array<[number, number]> = []
+  let offset = 0
+  let paramIndex = 0
+
+  for (const part of segment.parts) {
+    if (part.kind === "static") {
+      offset += part.value.length
+      continue
+    }
+
+    const captureValue = match.groups[`p${paramIndex}`]
+    if (typeof captureValue !== "string" || captureValue.length === 0) {
+      return null
+    }
+
+    const captureStart = start + offset
+    const captureEnd = captureStart + captureValue.length
+    const decoded = decodeCapture(rawPath, captureStart, captureEnd, maxParamLength)
+    if (decoded === null) {
+      return null
+    }
+    if (part.constraint && !part.constraint.test(decoded)) {
+      return null
+    }
+
+    captures.push([captureStart, captureEnd])
+    offset += captureValue.length
+    paramIndex += 1
+  }
+
+  if (offset !== (end - start)) {
+    return null
+  }
+
+  return captures
+}
+
 function finalizeFind(
   route: RouteDefinition,
   rawPath: string,
   captures: Array<[number, number]>,
   maxParamLength: number,
 ): MatchResult | null {
+  if (!hasValidTrailingWildcardCapture(route, rawPath, captures)) {
+    return null
+  }
+
   const names = getCaptureNames(route)
   if (names.length === 0) {
     return {
@@ -604,6 +808,10 @@ function finalizeSingleCaptureFind(
   end: number,
   maxParamLength: number,
 ): MatchResult | null {
+  if (!hasValidTrailingWildcardCaptureRange(route, rawPath, start, end)) {
+    return null
+  }
+
   const decoded = decodeCapture(rawPath, start, end, maxParamLength)
   if (decoded === null) {
     return null
@@ -623,6 +831,10 @@ function finalizeLookup(
   maxParamLength: number,
   onMatch: LookupHandler,
 ): boolean {
+  if (!hasValidTrailingWildcardCapture(route, rawPath, captures)) {
+    return false
+  }
+
   const names = getCaptureNames(route)
   if (names.length === 0) {
     onMatch(route.storeId, null, route.routePath)
@@ -673,6 +885,10 @@ function finalizeSingleCaptureLookup(
   maxParamLength: number,
   onMatch: LookupHandler,
 ): boolean {
+  if (!hasValidTrailingWildcardCaptureRange(route, rawPath, start, end)) {
+    return false
+  }
+
   const decoded = decodeCapture(rawPath, start, end, maxParamLength)
   if (decoded === null) {
     return false
@@ -820,7 +1036,10 @@ function findTrailingWildcardMatch(
     if (!capture) {
       continue
     }
-    return finalizeSingleCaptureFind(route.route, rawPath, capture[0], capture[1], maxParamLength)
+    const result = finalizeSingleCaptureFind(route.route, rawPath, capture[0], capture[1], maxParamLength)
+    if (result) {
+      return result
+    }
   }
 
   return null
@@ -838,7 +1057,9 @@ function lookupTrailingWildcardMatch(
     if (!capture) {
       continue
     }
-    return finalizeSingleCaptureLookup(route.route, rawPath, capture[0], capture[1], maxParamLength, onMatch)
+    if (finalizeSingleCaptureLookup(route.route, rawPath, capture[0], capture[1], maxParamLength, onMatch)) {
+      return true
+    }
   }
 
   return false
@@ -890,6 +1111,52 @@ function decodeCapture(
     return null
   }
   return decoded
+}
+
+function hasValidTrailingWildcardCapture(
+  route: RouteDefinition,
+  rawPath: string,
+  captures: Array<[number, number]>,
+): boolean {
+  const fixedSegmentCount = getTrailingWildcardSegmentCount(route)
+  if (fixedSegmentCount === null) {
+    return true
+  }
+
+  const capture = captures[captures.length - 1]
+  if (!capture) {
+    return false
+  }
+
+  return countSegmentsInRange(rawPath, capture[0], capture[1]) === fixedSegmentCount
+}
+
+function hasValidTrailingWildcardCaptureRange(
+  route: RouteDefinition,
+  rawPath: string,
+  start: number,
+  end: number,
+): boolean {
+  const fixedSegmentCount = getTrailingWildcardSegmentCount(route)
+  if (fixedSegmentCount === null) {
+    return true
+  }
+
+  return countSegmentsInRange(rawPath, start, end) === fixedSegmentCount
+}
+
+function countSegmentsInRange(path: string, start: number, end: number): number {
+  if (start === end) {
+    return 0
+  }
+
+  let count = 1
+  for (let index = start; index < end; index++) {
+    if (path.charCodeAt(index) === 47) {
+      count += 1
+    }
+  }
+  return count
 }
 
 function getPathRootKey(matchPath: string): string | null {

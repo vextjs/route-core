@@ -20,7 +20,6 @@
 - [当前性能对比](#当前性能对比)
 - [快速开始](#快速开始)
 - [支持的路由模式](#支持的路由模式)
-- [和 hapi 这类路由器相比少了什么](#和-hapi-这类路由器相比少了什么)
 - [高性能接入快速开始](#高性能接入快速开始)
 - [API 参考](#api-参考)
   - [`createRouter(options?)`](#createrouteroptions)
@@ -45,7 +44,6 @@
 - [错误参考](#错误参考)
 - [变更日志](#变更日志)
 - [许可证](#许可证)
-- [何时看哪份文档](#何时看哪份文档)
 
 ## 文档定位
 
@@ -99,22 +97,34 @@ npm install route-core
 
 - 你要的是最简单接入，优先选**标准用法**。
 - 你选 `route-core` 的主要原因就是性能，优先选**高性能接入用法**。
-- 当前版本真正稳定、明显超过 `find-my-way` 的，是高性能接入用法。
+- 在这台机器上的本地复测里，高性能接入用法最容易体现出相对 `find-my-way` 的领先。
 
 下面这组数据来自当前仓库在 `2026-05-29` 的本地实测，命令分别是 `npm run bench:compat` 和 `npm run bench:hot`：
 
-| 场景 | 这代表什么 | `find-my-way` | route-core 标准用法 | route-core 高性能接入用法 |
-|------|------|------|------|------|
-| static | 精确静态路径，例如 `/users` | 约 `5.4M` 到 `5.9M 次/秒` | 约 `5.8M` 到 `6.0M 次/秒` | 约 `7.4M` 到 `7.5M 次/秒` |
-| params | 参数路径，例如 `/users/:id` | 约 `2.5M` 到 `3.1M 次/秒` | 约 `3.0M` 到 `3.2M 次/秒` | 约 `3.9M` 到 `4.2M 次/秒` |
-| wildcard | 尾部通配符路径，例如 `/assets/*file` | 约 `3.2M` 到 `3.4M 次/秒` | 约 `2.8M` 到 `2.9M 次/秒` | 约 `4.7M` 到 `4.9M 次/秒` |
-| miss | 根本没命中任何路由的查找 | 约 `5.7M` 到 `6.7M 次/秒` | 约 `6.3M` 到 `6.5M 次/秒` | 约 `12.4M` 到 `12.5M 次/秒` |
+更贴近适配层分发场景的 `lookup()` 口径：
+
+| 场景 | `find-my-way lookup` | route-core `lookup()` | route-core 高性能 `lookupPrepared()` |
+|------|------|------|------|
+| static | `6.24M 次/秒` | `6.05M 次/秒` | `8.34M 次/秒` |
+| params | `2.69M 次/秒` | `2.82M 次/秒` | `3.68M 次/秒` |
+| wildcard | `3.38M 次/秒` | `2.91M 次/秒` | `4.24M 次/秒` |
+| miss | `6.27M 次/秒` | `6.32M 次/秒` | `12.63M 次/秒` |
+
+直接返回结果对象的 `find()` 口径：
+
+| 场景 | `find-my-way find` | route-core `find()` | route-core 高性能 `findPrepared()` |
+|------|------|------|------|
+| static | `5.30M 次/秒` | `5.71M 次/秒` | `7.96M 次/秒` |
+| params | `2.59M 次/秒` | `2.95M 次/秒` | `3.62M 次/秒` |
+| wildcard | `3.23M 次/秒` | `2.99M 次/秒` | `4.16M 次/秒` |
+| miss | `6.38M 次/秒` | `6.67M 次/秒` | `11.68M 次/秒` |
 
 怎么理解这张表：
 
-- 标准用法更适合先接进去，但不是“所有场景都大幅领先”的模式。
+- 标准用法更适合先接进去，但不是“所有场景都稳定全面领先”的模式。
 - 高性能接入用法才是性能优先模式；如果你是因为速度选它，应该重点看这一列。
-- wildcard 场景就是一个很直观的例子：高性能接入用法明显强于标准用法，也明显强于 `find-my-way`。
+- 当前版本里，和 `find-my-way` 拉开差距最明显的，还是高性能接入用法。
+- mixed/regex 这类 advanced route 现在也已经有专项 benchmark，但它们当前更偏向“补表达力”，不是这一版里用来正面对打 `find-my-way` 吞吐的主战场。
 
 你也可以在自己的机器上直接复核：
 
@@ -182,17 +192,27 @@ router.lookup('GET', '/users/42', (storeId, params, routePath) => {
 
 - 精确静态路由，例如 `/users`
 - 命名参数路由，例如 `/users/:id`
+- 单段内混合参数，例如 `/assets/:name.:ext`
+- 单段内多个参数，例如 `/near/:lat-:lng`
+- 单段级正则参数，例如 `/reports/:id(^\\d+)`
+- 尾部可选参数路由，例如 `/optional/:id?`
+- 固定段数的尾部多段参数路由，例如 `/files/*2:path`
 - 尾部通配符路由，例如 `/assets/*file`
 - 裸通配符 `*`
 - 作为 method 兜底的 `ANY`
 
 当前限制：
 
+- 正则约束只作用在单段参数内部
+- 可选参数只能出现在最后一段
+- 可选参数必须独占最后一段
+- 固定段数的多段参数只能出现在最后一段
 - 通配符只能出现在最后一段
+- 单段内如果有多个参数，参数之间必须有静态分隔符，所以 `:left:right` 非法
 - 路径必须以 `/` 开头，除非整条路由就是裸通配符 `*`
 - 不能有空路径段，例如 `/users//profile`
 - 归一化后的路由形态必须唯一，所以 `/users/:id` 会和 `/users/:name` 冲突
-- 当前不支持可选段、正则参数、位于路径中间的通配符
+- 不支持位于路径中间的通配符，也不支持 full-path regex route
 
 完整示例：
 
@@ -203,9 +223,15 @@ const router = createRouter()
 
 router.add('GET', '/users', 0)
 router.add('GET', '/users/:id', 1)
-router.add('GET', '/assets/*file', 2)
-router.add('ANY', '/health', 3)
-router.add('GET', '*', 4)
+router.add('GET', '/assets/:name.:ext', 2)
+router.add('GET', '/near/:lat-:lng', 3)
+router.add('GET', '/reports/:id(^\\d+).json', 4)
+router.add('GET', '/optional/:id?', 5)
+router.add('GET', '/optional', 6)
+router.add('GET', '/files/*2:path', 7)
+router.add('GET', '/assets/*file', 8)
+router.add('ANY', '/health', 9)
+router.add('GET', '*', 10)
 
 console.log(router.find('GET', '/users'))
 // { storeId: 0, params: null, routePath: '/users' }
@@ -213,14 +239,35 @@ console.log(router.find('GET', '/users'))
 console.log(router.find('GET', '/users/42'))
 // { storeId: 1, params: { id: '42' }, routePath: '/users/:id' }
 
+console.log(router.find('GET', '/assets/app.js'))
+// { storeId: 2, params: { name: 'app', ext: 'js' }, routePath: '/assets/:name.:ext' }
+
+console.log(router.find('GET', '/near/12.3-45.6'))
+// { storeId: 3, params: { lat: '12.3', lng: '45.6' }, routePath: '/near/:lat-:lng' }
+
+console.log(router.find('GET', '/reports/123.json'))
+// { storeId: 4, params: { id: '123' }, routePath: '/reports/:id(^\\d+).json' }
+
+console.log(router.find('GET', '/optional'))
+// { storeId: 6, params: null, routePath: '/optional' }
+
+console.log(router.find('GET', '/optional/42'))
+// { storeId: 5, params: { id: '42' }, routePath: '/optional/:id?' }
+
+console.log(router.find('GET', '/files/a/b'))
+// { storeId: 7, params: { path: 'a/b' }, routePath: '/files/*2:path' }
+
+console.log(router.find('GET', '/files/a'))
+// null
+
 console.log(router.find('GET', '/assets/js/app.js'))
-// { storeId: 2, params: { file: 'js/app.js' }, routePath: '/assets/*file' }
+// { storeId: 8, params: { file: 'js/app.js' }, routePath: '/assets/*file' }
 
 console.log(router.find('POST', '/health'))
-// { storeId: 3, params: null, routePath: '/health' }
+// { storeId: 9, params: null, routePath: '/health' }
 
 console.log(router.find('GET', '/anything-else'))
-// { storeId: 4, params: null, routePath: '*' }
+// { storeId: 10, params: { wildcard: 'anything-else' }, routePath: '*' }
 ```
 
 不支持的写法示例：
@@ -228,15 +275,20 @@ console.log(router.find('GET', '/anything-else'))
 ```js
 router.add('GET', 'users', 0)              // 非法：必须以 / 开头
 router.add('GET', '/users/*file/edit', 1)  // 非法：通配符必须在最后
-router.add('GET', '/users/:id?', 2)        // 非法：不支持可选参数
-router.add('GET', '/users/:id(\\d+)', 3)   // 非法：不支持正则参数
+router.add('GET', '/users/:id?/tail', 2)   // 非法：可选参数必须在最后
+router.add('GET', '/users/*0:path', 3)     // 非法：固定段数必须是正整数
+router.add('GET', '/users/:id?.json', 4)   // 非法：可选参数必须独占最后一段
+router.add('GET', '/users/:left:right', 5) // 非法：相邻参数之间必须有静态分隔符
+router.add('GET', '/users/:id([)', 6)      // 非法：正则约束格式错误
 ```
 
 优先级规则：
 
-- 静态路由优先于参数路由
-- 参数路由优先于通配符路由
+- 静态路由优先于混合段或正则约束段
+- 混合段或正则约束段优先于普通参数段
+- 普通参数段优先于通配符路由
 - 具体 method 优先于 `ANY`
+- 显式静态路由优先于尾部可选参数的“省略分支”
 
 例如：
 
@@ -256,32 +308,6 @@ console.log(router.find('GET', '/users/42'))
 console.log(router.find('GET', '/users/a/b'))
 // { storeId: 2, params: { rest: 'a/b' }, routePath: '/users/*rest' }
 ```
-
-## 和 hapi 这类路由器相比少了什么
-
-如果把 `route-core` 和 `hapi` 这种完整框架路由器放在一起看，最大区别其实不是“快一点还是慢一点”，而是能力范围。
-
-`route-core` 故意只支持更小的一套路由语法：
-
-- 精确静态路径
-- 每段一个命名参数，例如 `/users/:id`
-- 只在最后一段出现的通配符，例如 `/assets/*file`
-- `ANY` method 兜底
-
-而 `hapi` 这类路由器还支持、但 `route-core` 当前不支持的能力包括：
-
-- 可选参数，例如 `/hello/{user?}`
-- 指定段数的多段参数，例如 `/hello/{user*2}`
-- 单段内混合参数，例如 `/{filename}.jpg`
-- 单段内多个参数，例如 `/{filename}.{ext}`
-- 在路由声明里直接挂 handler、校验、认证和更多框架级配置
-
-对使用者来说可以这样理解：
-
-- 你要的是一个小而明确的匹配内核，准备自己接 handler、middleware、store 和上下文，就选 `route-core`
-- 你要的是更丰富的路由表达能力和更完整的框架级路由能力，就选 `hapi` 这类完整路由器
-
-所以 `route-core` 不是要做成 `hapi` 的语法兼容替身，而是一个能力边界更窄、但更适合热路径集成的路由核心。
 
 ## 高性能接入快速开始
 
@@ -345,7 +371,7 @@ function createRouter(options?: RouterOptions): Router
 | `ignoreTrailingSlash` | `boolean` | `true` | 把 `/foo` 和 `/foo/` 视为同一路由 |
 | `caseSensitive` | `boolean` | `false` | 为 `false` 时，匹配键会规范化为小写 |
 | `maxParamLength` | `number` | `500` | 单个参数段解码后的最大长度；超限返回 `null` |
-| `allowWildcard` | `boolean` | `true` | 为 `false` 时，通配符路由会抛出 `InvalidPathError` |
+| `allowWildcard` | `boolean` | `true` | 为 `false` 时，`*name` 和 `*2:name` 都会抛出 `InvalidPathError` |
 
 ### `router.add(method, path, storeId)`
 
@@ -358,7 +384,7 @@ router.add(method: string, path: string, storeId: number): void
 | 参数 | 说明 |
 |------|------|
 | `method` | HTTP method。内置包括 `GET`、`POST`、`PUT`、`PATCH`、`DELETE`、`HEAD`、`OPTIONS`、`CONNECT` 和 `ANY`。method 会规范化为大写。 |
-| `path` | 路由模式。支持静态段、`:param` 命名参数，以及尾部 `*name` 通配符。 |
+| `path` | 路由模式。支持静态段、`:param`、`:name.:ext` 这类混合段、`:id(^\\d+)` 这类单段正则参数、尾部 `:param?`、尾部 `*name`、尾部 `*2:name`，以及裸 `*`。 |
 | `storeId` | 命中时返回的非负安全整数。你的框架可以把它映射回 handler 或 store。 |
 
 错误：
@@ -366,7 +392,7 @@ router.add(method: string, path: string, storeId: number): void
 | 错误类 | Code | 触发条件 |
 |--------|------|----------|
 | `RouteConflictError` | `ERR_ROUTE_CONFLICT` | 同 method 和归一路由形状重复注册 |
-| `InvalidPathError` | `ERR_INVALID_PATH` | `allowWildcard=false` 时仍使用通配符路由 |
+| `InvalidPathError` | `ERR_INVALID_PATH` | 路由语法无效、可选/通配符位置非法，或 `allowWildcard=false` 时仍使用通配符路由 |
 | `InvalidMethodError` | `ERR_INVALID_METHOD` | method 为空字符串 |
 | `InvalidStoreIdError` | `ERR_INVALID_STORE_ID` | `storeId` 不是非负安全整数 |
 
@@ -539,17 +565,24 @@ function dispatch(method, pathname, res) {
 |----------|------|----------|
 | Static | `/users/profile` | 精确匹配 |
 | Param | `/users/:id` | `/users/42` -> `{ id: '42' }` |
+| Mixed segment | `/assets/:name.:ext` | `/assets/app.js` -> `{ name: 'app', ext: 'js' }` |
+| Multiple params in one segment | `/near/:lat-:lng` | `/near/12.3-45.6` -> `{ lat: '12.3', lng: '45.6' }` |
+| Segment regex param | `/reports/:id(^\\d+)` | `/reports/123` -> `{ id: '123' }` |
+| Optional param | `/optional/:id?` | `/optional` 或 `/optional/42` |
+| Fixed multi-segment | `/files/*2:path` | `/files/a/b` -> `{ path: 'a/b' }` |
 | Wildcard | `/assets/*file` | `/assets/js/app.js` -> `{ file: 'js/app.js' }` |
 | Bare wildcard | `*` | 匹配任意路径 |
 
-归一路由形状必须唯一。例如 `/users/:id` 会与 `/users/:name` 冲突，`/assets/*file` 会与 `/assets/*path` 冲突。
+归一路由形状必须唯一。例如 `/users/:id` 会与 `/users/:name` 冲突，`/assets/:name.:ext` 会与 `/assets/:file.:kind` 冲突，`/assets/*file` 会与 `/assets/*path` 冲突。
+
+尾部可选参数在内部会被当成“省略分支 + 实际参数分支”。如果你又显式注册了省略后的静态路径，静态路由优先。
 
 ### 优先级
 
 当多条模式都可能命中同一路径时，`route-core` 使用以下顺序：
 
 ```text
-static > :param > *wildcard
+static > pattern segment > :param > *wildcard
 ```
 
 ### `ANY` Method
@@ -634,7 +667,7 @@ function resolve(method: string, pathname: string, res: any) {
 能直接对齐的能力：
 
 - `method + path` 注册模型
-- 命名参数与尾部 wildcard 语义
+- 命名参数、单段混合参数、单段正则参数、尾部可选参数、尾部 wildcard 与固定段数多段参数语义
 - `ANY` 兜底 bucket
 - 命中时返回 `routePath`，可直接用于 `req.route`
 
@@ -709,7 +742,7 @@ const {
 | 错误类 | Code | 触发条件 |
 |--------|------|----------|
 | `RouteConflictError` | `ERR_ROUTE_CONFLICT` | 同 method 和归一路由形状重复注册 |
-| `InvalidPathError` | `ERR_INVALID_PATH` | `allowWildcard=false` 时仍使用通配符路由 |
+| `InvalidPathError` | `ERR_INVALID_PATH` | 路由语法无效、可选/通配符位置非法，或 `allowWildcard=false` 时仍使用通配符路由 |
 | `InvalidMethodError` | `ERR_INVALID_METHOD` | method 为空字符串 |
 | `InvalidStoreIdError` | `ERR_INVALID_STORE_ID` | `storeId` 不是非负安全整数 |
 
@@ -721,7 +754,3 @@ const {
 ## 许可证
 
 MIT
-
-## 何时看变更说明
-
-如果你要确认当前版本已经归档了什么变更，直接看 [../changelogs/v0.0.2.md](../changelogs/v0.0.2.md)。

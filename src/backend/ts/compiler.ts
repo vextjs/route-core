@@ -1,6 +1,11 @@
 import type { MatchResult } from "../../types.js"
 import type { RouteDefinition } from "./ir.js"
-import { isExactStaticRoute } from "./ir.js"
+import {
+  getExactStaticPath,
+  getTrailingWildcardSegmentCount,
+  hasPatternSegments,
+  isExactStaticRoute,
+} from "./ir.js"
 import { compileDynamicMatcher } from "./codegen-dynamic.js"
 import { compileStaticDispatcher } from "./codegen-static.js"
 import { createDynamicScannerRuntime, createExactStaticMapRuntime } from "./runtime-fallback.js"
@@ -76,22 +81,36 @@ function compileMethodRoutes(
   routes: RouteDefinition[],
   maxParamLength: number,
 ): CompiledMethodRuntime {
-  const staticRoutes = routes.filter(isExactStaticRoute)
+  const staticRoutes = dedupeExactStaticRoutes(routes.filter(isExactStaticRoute))
   const dynamicRoutes = routes.filter((route) => !isExactStaticRoute(route))
+  const advancedDynamicRoutes = dynamicRoutes.filter((route) => {
+    return getTrailingWildcardSegmentCount(route) !== null || hasPatternSegments(route)
+  })
+  const advancedDynamicRouteSet = new Set(advancedDynamicRoutes)
+  const simpleDynamicRoutes = dynamicRoutes.filter((route) => !advancedDynamicRouteSet.has(route))
 
   const staticRuntime = staticRoutes.length > MAX_GENERATED_STATIC_ROUTES
     ? { ...createExactStaticMapRuntime(staticRoutes), sourceLength: 0 }
     : compileStaticDispatcher(staticRoutes)
-  const dynamicRuntime = dynamicRoutes.length > MAX_GENERATED_DYNAMIC_ROUTES
-    ? { ...createDynamicScannerRuntime(dynamicRoutes, maxParamLength), sourceLength: 0 }
-    : compileDynamicMatcher(dynamicRoutes, maxParamLength)
+  const simpleDynamicRuntime = simpleDynamicRoutes.length === 0
+    ? createEmptyDynamicRuntime()
+    : simpleDynamicRoutes.length > MAX_GENERATED_DYNAMIC_ROUTES
+      ? { ...createDynamicScannerRuntime(simpleDynamicRoutes, maxParamLength), sourceLength: 0 }
+      : compileDynamicMatcher(simpleDynamicRoutes, maxParamLength)
+  const advancedDynamicRuntime = advancedDynamicRoutes.length === 0
+    ? createEmptyDynamicRuntime()
+    : { ...createDynamicScannerRuntime(advancedDynamicRoutes, maxParamLength), sourceLength: 0 }
   const methodDispatch = createMethodDispatch(staticRoutes, dynamicRoutes)
 
   return {
     find(rawPath, matchPath) {
       const dispatch = methodDispatch.classify(matchPath)
       if (dispatch === "dynamic-only") {
-        return dynamicRuntime.find(rawPath, matchPath)
+        const advancedMatch = advancedDynamicRuntime.find(rawPath, matchPath)
+        if (advancedMatch) {
+          return advancedMatch
+        }
+        return simpleDynamicRuntime.find(rawPath, matchPath)
       }
       if (dispatch === "miss") {
         return null
@@ -105,12 +124,20 @@ function compileMethodRoutes(
         return staticMatch
       }
 
-      return dynamicRuntime.find(rawPath, matchPath)
+      const advancedMatch = advancedDynamicRuntime.find(rawPath, matchPath)
+      if (advancedMatch) {
+        return advancedMatch
+      }
+
+      return simpleDynamicRuntime.find(rawPath, matchPath)
     },
     lookup(rawPath, matchPath, onMatch) {
       const dispatch = methodDispatch.classify(matchPath)
       if (dispatch === "dynamic-only") {
-        return dynamicRuntime.lookup(rawPath, matchPath, onMatch)
+        if (advancedDynamicRuntime.lookup(rawPath, matchPath, onMatch)) {
+          return true
+        }
+        return simpleDynamicRuntime.lookup(rawPath, matchPath, onMatch)
       }
       if (dispatch === "miss") {
         return false
@@ -123,12 +150,17 @@ function compileMethodRoutes(
         return true
       }
 
-      return dynamicRuntime.lookup(rawPath, matchPath, onMatch)
+      if (advancedDynamicRuntime.lookup(rawPath, matchPath, onMatch)) {
+        return true
+      }
+
+      return simpleDynamicRuntime.lookup(rawPath, matchPath, onMatch)
     },
     matches(rawPath, matchPath) {
       const dispatch = methodDispatch.classify(matchPath)
       if (dispatch === "dynamic-only") {
-        return dynamicRuntime.find(rawPath, matchPath) !== null
+        return advancedDynamicRuntime.find(rawPath, matchPath) !== null
+          || simpleDynamicRuntime.find(rawPath, matchPath) !== null
       }
       if (dispatch === "miss") {
         return false
@@ -141,14 +173,41 @@ function compileMethodRoutes(
         return true
       }
 
-      return dynamicRuntime.find(rawPath, matchPath) !== null
+      return advancedDynamicRuntime.find(rawPath, matchPath) !== null
+        || simpleDynamicRuntime.find(rawPath, matchPath) !== null
     },
     meta: {
       staticRouteCount: staticRoutes.length,
       dynamicRouteCount: dynamicRoutes.length,
-      sourceLength: staticRuntime.sourceLength + dynamicRuntime.sourceLength,
+      sourceLength: staticRuntime.sourceLength + simpleDynamicRuntime.sourceLength + advancedDynamicRuntime.sourceLength,
     },
   }
+}
+
+function createEmptyDynamicRuntime(): {
+  find: CompiledMethodRuntime["find"]
+  lookup: CompiledMethodRuntime["lookup"]
+  sourceLength: number
+} {
+  return {
+    find: () => null,
+    lookup: () => false,
+    sourceLength: 0,
+  }
+}
+
+function dedupeExactStaticRoutes(routes: RouteDefinition[]): RouteDefinition[] {
+  const byPath = new Map<string, RouteDefinition>()
+
+  for (const route of routes) {
+    const exactPath = getExactStaticPath(route)
+    const current = byPath.get(exactPath)
+    if (!current || route.priority > current.priority) {
+      byPath.set(exactPath, route)
+    }
+  }
+
+  return [...byPath.values()]
 }
 
 type DispatchAction = "fallback" | "static-only" | "dynamic-only" | "miss"

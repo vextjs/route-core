@@ -2,7 +2,7 @@ import type { MatchResult } from "../../types.js"
 import { decodeSegmentRange } from "./normalize.js"
 import type { LookupHandler } from "./trie.js"
 import type { DynamicTrieNode, RouteDefinition } from "./ir.js"
-import { buildDynamicTrie, getCaptureNames } from "./ir.js"
+import { buildDynamicTrie, getCaptureNames, hasPatternSegments } from "./ir.js"
 import { generateTerminalFinalizer } from "./codegen-finalizer.js"
 
 export type DynamicFindFn = (rawPath: string, matchPath: string) => MatchResult | null
@@ -26,6 +26,10 @@ export function compileDynamicMatcher(
   routes: RouteDefinition[],
   maxParamLength: number,
 ): DynamicCodegenResult {
+  if (routes.some(hasPatternSegments)) {
+    throw new TypeError("pattern routes must use the scanner runtime")
+  }
+
   if (routes.length === 0) {
     return {
       find: () => null,

@@ -15,3 +15,8 @@
 - Added a fresh benchmark snapshot to the English and Chinese READMEs so users can see when standard usage is enough and when the high-throughput path is the better fit.
 - Added complete route-pattern examples to the English and Chinese READMEs so users can see the supported matching modes and priority rules at a glance.
 - Added explicit capability-boundary guidance comparing route-core with richer framework routers such as hapi, including unsupported route syntax users should not assume exists.
+- Added first-phase route syntax expansion with trailing optional params (`:id?`) and fixed-count trailing multi-segment params (`*2:name`), including conflict handling, hot-path coverage, and updated English/Chinese usage docs.
+- Added second-phase route syntax expansion with mixed single-segment params, separated multi-param segments, and segment-level regex params, while keeping advanced buckets on the scanner fallback path so the existing simple-route hot path stays stable.
+- Split simple and advanced dynamic runtimes after adding mixed/regex route benchmarks, so pattern-heavy buckets no longer force every plain param route onto the same fallback path, and added dedicated mixed/regex benchmark budgets to catch future regressions.
+- Removed the README chapter that compared `route-core` against fuller framework routers, and folded the important boundaries back into the supported-patterns and limitations sections for users.
+- Recalibrated the compat and hot benchmark budgets to match the current stable serial benchmark envelope, and softened the README performance wording to stop over-promising across-the-board wins.

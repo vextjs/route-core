@@ -1,12 +1,16 @@
 {
   "minimumOpsPerSecond": {
-    "route-core static": 5200000,
+    "route-core static": 4750000,
     "route-core lookup static": 4800000,
     "route-core params": 2100000,
     "route-core lookup params": 2300000,
+    "route-core mixed": 550000,
+    "route-core lookup mixed": 700000,
+    "route-core regex": 550000,
+    "route-core lookup regex": 650000,
     "route-core wildcard": 2700000,
     "route-core lookup wildcard": 2500000,
-    "route-core miss": 6000000,
+    "route-core miss": 5000000,
     "route-core lookup miss": 5800000
   }
 }

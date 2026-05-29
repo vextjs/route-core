@@ -52,10 +52,23 @@ function createRouteCoreRouter() {
   return router
 }
 
+function createAdvancedRouteCoreRouter() {
+  const router = createRouter()
+  for (let index = 0; index < 1000; index++) {
+    router.add('GET', `/assets/${index}/:name.:ext`, 2000 + index)
+    router.add('GET', `/reports/${index}/:id(^\\d+).json`, 3000 + index)
+  }
+  return router
+}
+
 const routeCore = createRouteCoreRouter()
+const routeCoreAdvanced = createAdvancedRouteCoreRouter()
 const get = routeCore.prepareMethod('GET')
+const getAdvanced = routeCoreAdvanced.prepareMethod('GET')
 const findMyWayLookup = createFindMyWayRouter()
 const findMyWayFind = createFindMyWayRouter()
+const findMyWayAdvancedLookup = createFindMyWayRouter({ advanced: true })
+const findMyWayAdvancedFind = createFindMyWayRouter({ advanced: true })
 
 bench('find-my-way lookup static', (index) => {
   lookup(findMyWayLookup, 'GET', `/static/${index % 1000}`)
@@ -87,6 +100,38 @@ bench('route-core hot params', (index) => {
 
 bench('route-core hot lookup params', (index) => {
   get.lookup(`/users/${index % 1000}/abc`, noop)
+})
+
+bench('find-my-way lookup mixed', (index) => {
+  lookup(findMyWayAdvancedLookup, 'GET', `/assets/${index % 1000}/app.js`)
+})
+
+bench('find-my-way find mixed', (index) => {
+  find(findMyWayAdvancedFind, 'GET', `/assets/${index % 1000}/app.js`)
+})
+
+bench('route-core hot mixed', (index) => {
+  getAdvanced.find(`/assets/${index % 1000}/app.js`)
+})
+
+bench('route-core hot lookup mixed', (index) => {
+  getAdvanced.lookup(`/assets/${index % 1000}/app.js`, noop)
+})
+
+bench('find-my-way lookup regex', (index) => {
+  lookup(findMyWayAdvancedLookup, 'GET', `/reports/${index % 1000}/123.json`)
+})
+
+bench('find-my-way find regex', (index) => {
+  find(findMyWayAdvancedFind, 'GET', `/reports/${index % 1000}/123.json`)
+})
+
+bench('route-core hot regex', (index) => {
+  getAdvanced.find(`/reports/${index % 1000}/123.json`)
+})
+
+bench('route-core hot lookup regex', (index) => {
+  getAdvanced.lookup(`/reports/${index % 1000}/123.json`, noop)
 })
 
 bench('find-my-way lookup wildcard', (index) => {

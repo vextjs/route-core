@@ -91,3 +91,71 @@ test('prepared method handles stay live after add()', () => {
     routePath: '/rpc',
   })
 })
+
+test('hot prepared method supports optional params and fixed multi-segment wildcards', () => {
+  const router = createRouter()
+  router.add('GET', '/optional/:id?', 10)
+  router.add('GET', '/files/*2:path', 11)
+
+  const get = router.prepareMethod('GET')
+
+  assert.deepEqual(get.find('/optional'), {
+    storeId: 10,
+    params: null,
+    routePath: '/optional/:id?',
+  })
+
+  assert.deepEqual(get.find('/optional/42'), {
+    storeId: 10,
+    params: { id: '42' },
+    routePath: '/optional/:id?',
+  })
+
+  assert.deepEqual(get.find('/files/a/b'), {
+    storeId: 11,
+    params: { path: 'a/b' },
+    routePath: '/files/*2:path',
+  })
+
+  assert.equal(get.find('/files/a'), null)
+})
+
+test('hot prepared method supports mixed segments and regex params', () => {
+  const router = createRouter()
+  router.add('GET', '/assets/:name.:ext', 20)
+  router.add('GET', '/assets/:id(^\\d+)', 21)
+  router.add('GET', '/assets/:left-:right', 22)
+  router.add('GET', '/assets/*file', 23)
+
+  const get = router.prepareMethod('GET')
+
+  assert.deepEqual(get.find('/assets/app.js'), {
+    storeId: 20,
+    params: { name: 'app', ext: 'js' },
+    routePath: '/assets/:name.:ext',
+  })
+
+  assert.deepEqual(get.find('/assets/123'), {
+    storeId: 21,
+    params: { id: '123' },
+    routePath: '/assets/:id(^\\d+)',
+  })
+
+  assert.deepEqual(get.find('/assets/user-admin'), {
+    storeId: 22,
+    params: { left: 'user', right: 'admin' },
+    routePath: '/assets/:left-:right',
+  })
+
+  assert.deepEqual(get.find('/assets/js/app.js'), {
+    storeId: 23,
+    params: { file: 'js/app.js' },
+    routePath: '/assets/*file',
+  })
+
+  assert.deepEqual(get.find('/assets/slug'), {
+    storeId: 23,
+    params: { file: 'slug' },
+    routePath: '/assets/*file',
+  })
+})

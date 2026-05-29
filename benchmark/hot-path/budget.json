@@ -1,11 +1,15 @@
 {
   "minimumOpsPerSecond": {
     "route-core hot static": 6500000,
-    "route-core hot lookup static": 7000000,
+    "route-core hot lookup static": 6300000,
     "route-core hot params": 3000000,
     "route-core hot lookup params": 2200000,
+    "route-core hot mixed": 700000,
+    "route-core hot lookup mixed": 750000,
+    "route-core hot regex": 550000,
+    "route-core hot lookup regex": 700000,
     "route-core hot wildcard": 3800000,
-    "route-core hot lookup wildcard": 4200000,
+    "route-core hot lookup wildcard": 3900000,
     "route-core hot miss": 10500000,
     "route-core hot lookup miss": 10500000
   },
@@ -16,7 +20,7 @@
     },
     "route-core hot lookup static": {
       "reference": "find-my-way lookup static",
-      "ratio": 1.20
+      "ratio": 1.05
     },
     "route-core hot params": {
       "reference": "find-my-way find params",

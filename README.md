@@ -25,7 +25,6 @@ Most users should start with standard usage. Only switch to the high-throughput 
 - [Current Performance Snapshot](#current-performance-snapshot)
 - [Quick Start](#quick-start)
 - [Supported Route Patterns](#supported-route-patterns)
-- [Compared with hapi-style Routers](#compared-with-hapi-style-routers)
 - [High-Throughput Quick Start](#high-throughput-quick-start)
 - [API Reference](#api-reference)
   - [createRouter(options?)](#createrouteroptions)
@@ -47,7 +46,6 @@ Most users should start with standard usage. Only switch to the high-throughput 
 - [Framework Integration](#framework-integration)
 - [Using route-core in a vext-like Adapter](#using-route-core-in-a-vext-like-adapter)
 - [TypeScript](#typescript)
-- [Language-Specific Documentation](#language-specific-documentation)
 - [Error Reference](#error-reference)
 - [Changelog](#changelog)
 - [License](#license)
@@ -95,22 +93,34 @@ Short version first:
 
 - If you want the easiest integration, choose **standard usage**.
 - If you picked `route-core` mainly for speed, choose **high-throughput usage**.
-- The current build only shows a clear, across-the-board performance lead over `find-my-way` on the high-throughput path.
+- The clearest lead over `find-my-way` on this machine comes from the high-throughput path.
 
 Latest local benchmark run on this project workspace, using `npm run bench:hot` and `npm run bench:compat` on May 29, 2026:
 
-| Scenario | What it means | `find-my-way` | route-core standard usage | route-core high-throughput usage |
-|------|------|------|------|------|
-| static | exact paths such as `/users` | about `5.4M` to `5.9M ops/sec` | about `5.8M` to `6.0M ops/sec` | about `7.4M` to `7.5M ops/sec` |
-| params | named params such as `/users/:id` | about `2.5M` to `3.1M ops/sec` | about `3.0M` to `3.2M ops/sec` | about `3.9M` to `4.2M ops/sec` |
-| wildcard | trailing wildcard routes such as `/assets/*file` | about `3.2M` to `3.4M ops/sec` | about `2.8M` to `2.9M ops/sec` | about `4.7M` to `4.9M ops/sec` |
-| miss | lookups that do not match any route | about `5.7M` to `6.7M ops/sec` | about `6.3M` to `6.5M ops/sec` | about `12.4M` to `12.5M ops/sec` |
+`lookup()`-style dispatch, which is usually the most relevant adapter metric:
+
+| Scenario | `find-my-way lookup` | route-core `lookup()` | route-core hot `lookupPrepared()` |
+|------|------|------|------|
+| static | `6.24M ops/sec` | `6.05M ops/sec` | `8.34M ops/sec` |
+| params | `2.69M ops/sec` | `2.82M ops/sec` | `3.68M ops/sec` |
+| wildcard | `3.38M ops/sec` | `2.91M ops/sec` | `4.24M ops/sec` |
+| miss | `6.27M ops/sec` | `6.32M ops/sec` | `12.63M ops/sec` |
+
+Direct result-returning lookups:
+
+| Scenario | `find-my-way find` | route-core `find()` | route-core hot `findPrepared()` |
+|------|------|------|------|
+| static | `5.30M ops/sec` | `5.71M ops/sec` | `7.96M ops/sec` |
+| params | `2.59M ops/sec` | `2.95M ops/sec` | `3.62M ops/sec` |
+| wildcard | `3.23M ops/sec` | `2.99M ops/sec` | `4.16M ops/sec` |
+| miss | `6.38M ops/sec` | `6.67M ops/sec` | `11.68M ops/sec` |
 
 How to read this:
 
-- Standard usage is the easier API surface, but it is not the mode where `route-core` always wins by a large margin.
+- Standard usage is the easier API surface, but it is not the mode where `route-core` always wins across every scenario.
 - High-throughput usage is the performance-first mode. That is the mode to benchmark if speed is your main decision point.
-- Wildcard-heavy workloads are the clearest example where the high-throughput path is meaningfully better than both standard usage and `find-my-way`.
+- On the current build, the hot path is the mode that leads `find-my-way` most consistently in these local benchmarks.
+- Mixed-segment and regex-constrained routes are now covered by dedicated benchmarks too, but today they are primarily about route expressiveness, not about beating `find-my-way` on raw throughput.
 
 To verify on your own machine:
 
@@ -178,17 +188,27 @@ The router currently supports these route shapes:
 
 - exact static routes such as `/users`
 - named params such as `/users/:id`
+- mixed params inside one segment such as `/assets/:name.:ext`
+- multiple params inside one segment such as `/near/:lat-:lng`
+- segment-level regex params such as `/reports/:id(^\\d+)`
+- trailing optional params such as `/optional/:id?`
+- fixed-count trailing multi-segment params such as `/files/*2:path`
 - trailing wildcards such as `/assets/*file`
 - bare wildcard `*`
 - `ANY` as a method fallback bucket
 
 Current limits:
 
+- regex constraints only apply inside a single segment param
+- optional params must be the final segment
+- optional params must occupy the whole final segment
+- fixed-count multi-segment params must be the final segment
 - wildcard segments must be the final segment
+- adjacent params inside one segment require a literal separator, so `:left:right` is invalid
 - routes must start with `/`, unless the whole route is the bare wildcard `*`
 - empty segments such as `/users//profile` are invalid
 - normalized route shapes must be unique, so `/users/:id` conflicts with `/users/:name`
-- one route does not support optional segments, regex params, or wildcard segments in the middle of the path
+- wildcard segments in the middle of the path and full-path regex routes are not supported
 
 Complete example:
 
@@ -199,9 +219,15 @@ const router = createRouter()
 
 router.add('GET', '/users', 0)
 router.add('GET', '/users/:id', 1)
-router.add('GET', '/assets/*file', 2)
-router.add('ANY', '/health', 3)
-router.add('GET', '*', 4)
+router.add('GET', '/assets/:name.:ext', 2)
+router.add('GET', '/near/:lat-:lng', 3)
+router.add('GET', '/reports/:id(^\\d+).json', 4)
+router.add('GET', '/optional/:id?', 5)
+router.add('GET', '/optional', 6)
+router.add('GET', '/files/*2:path', 7)
+router.add('GET', '/assets/*file', 8)
+router.add('ANY', '/health', 9)
+router.add('GET', '*', 10)
 
 console.log(router.find('GET', '/users'))
 // { storeId: 0, params: null, routePath: '/users' }
@@ -209,30 +235,56 @@ console.log(router.find('GET', '/users'))
 console.log(router.find('GET', '/users/42'))
 // { storeId: 1, params: { id: '42' }, routePath: '/users/:id' }
 
+console.log(router.find('GET', '/assets/app.js'))
+// { storeId: 2, params: { name: 'app', ext: 'js' }, routePath: '/assets/:name.:ext' }
+
+console.log(router.find('GET', '/near/12.3-45.6'))
+// { storeId: 3, params: { lat: '12.3', lng: '45.6' }, routePath: '/near/:lat-:lng' }
+
+console.log(router.find('GET', '/reports/123.json'))
+// { storeId: 4, params: { id: '123' }, routePath: '/reports/:id(^\\d+).json' }
+
+console.log(router.find('GET', '/optional'))
+// { storeId: 6, params: null, routePath: '/optional' }
+
+console.log(router.find('GET', '/optional/42'))
+// { storeId: 5, params: { id: '42' }, routePath: '/optional/:id?' }
+
+console.log(router.find('GET', '/files/a/b'))
+// { storeId: 7, params: { path: 'a/b' }, routePath: '/files/*2:path' }
+
+console.log(router.find('GET', '/files/a'))
+// null
+
 console.log(router.find('GET', '/assets/js/app.js'))
-// { storeId: 2, params: { file: 'js/app.js' }, routePath: '/assets/*file' }
+// { storeId: 8, params: { file: 'js/app.js' }, routePath: '/assets/*file' }
 
 console.log(router.find('POST', '/health'))
-// { storeId: 3, params: null, routePath: '/health' }
+// { storeId: 9, params: null, routePath: '/health' }
 
 console.log(router.find('GET', '/anything-else'))
-// { storeId: 4, params: null, routePath: '*' }
+// { storeId: 10, params: { wildcard: 'anything-else' }, routePath: '*' }
 ```
 
 Examples of unsupported route shapes:
 
 ```js
-router.add('GET', 'users', 0)           // invalid: must start with /
-router.add('GET', '/users/*file/edit', 1) // invalid: wildcard must be final
-router.add('GET', '/users/:id?', 2)     // invalid: optional params are not supported
-router.add('GET', '/users/:id(\\d+)', 3)  // invalid: regex params are not supported
+router.add('GET', 'users', 0)               // invalid: must start with /
+router.add('GET', '/users/*file/edit', 1)   // invalid: wildcard must be final
+router.add('GET', '/users/:id?/tail', 2)    // invalid: optional param must be final
+router.add('GET', '/users/*0:path', 3)      // invalid: fixed multi-segment count must be positive
+router.add('GET', '/users/:id?.json', 4)    // invalid: optional param must occupy the full final segment
+router.add('GET', '/users/:left:right', 5)  // invalid: adjacent params need a literal separator
+router.add('GET', '/users/:id([)', 6)       // invalid: malformed regex constraint
 ```
 
 Priority rules:
 
-- static routes win over param routes
-- param routes win over wildcard routes
+- static routes win over mixed or regex-constrained segment routes
+- mixed or regex-constrained segment routes win over plain param routes
+- plain param routes win over wildcard routes
 - concrete methods win over `ANY`
+- an explicit static route wins over the omitted branch of a trailing optional route
 
 For example:
 
@@ -252,32 +304,6 @@ console.log(router.find('GET', '/users/42'))
 console.log(router.find('GET', '/users/a/b'))
 // { storeId: 2, params: { rest: 'a/b' }, routePath: '/users/*rest' }
 ```
-
-## Compared with hapi-style Routers
-
-If you compare `route-core` with a full framework router such as `hapi`, the biggest difference is scope.
-
-`route-core` intentionally supports a smaller route syntax:
-
-- exact static paths
-- one named param per segment, such as `/users/:id`
-- trailing wildcard only, such as `/assets/*file`
-- `ANY` method fallback
-
-What `hapi` supports that `route-core` does not currently support:
-
-- optional params such as `/hello/{user?}`
-- multi-segment params with an explicit count such as `/hello/{user*2}`
-- mixed params inside a segment such as `/{filename}.jpg`
-- multiple params in one segment with separators such as `/{filename}.{ext}`
-- route declarations that attach handler, validation, auth, and framework options in one place
-
-What this means in practice:
-
-- choose `route-core` when you want a small, explicit matching core inside your own framework or adapter
-- choose a framework router like `hapi` when you want a richer route language and a larger built-in route feature set
-
-`route-core` is not trying to be a syntax-compatible clone of `hapi`. It is a narrower routing core with a smaller surface area and a stronger focus on hot-path integration.
 
 ## High-Throughput Quick Start
 
@@ -341,7 +367,7 @@ function createRouter(options?: RouterOptions): Router
 | `ignoreTrailingSlash` | `boolean` | `true` | Treats `/foo` and `/foo/` as the same route |
 | `caseSensitive` | `boolean` | `false` | When `false`, the matcher normalizes path keys to lowercase |
 | `maxParamLength` | `number` | `500` | Maximum decoded length for a parameter segment; overflow returns `null` |
-| `allowWildcard` | `boolean` | `true` | When `false`, wildcard routes throw `InvalidPathError` |
+| `allowWildcard` | `boolean` | `true` | When `false`, both `*name` and `*2:name` routes throw `InvalidPathError` |
 
 ### `router.add(method, path, storeId)`
 
@@ -354,7 +380,7 @@ router.add(method: string, path: string, storeId: number): void
 | Parameter | Description |
 |------|------|
 | `method` | HTTP method. Built-ins include `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, `CONNECT`, and `ANY`. Methods are normalized to uppercase. |
-| `path` | Route pattern. Supports static segments, `:param` named parameters, and trailing `*name` wildcards. |
+| `path` | Route pattern. Supports static segments, `:param`, mixed segments such as `:name.:ext`, segment regex params such as `:id(^\\d+)`, trailing `:param?`, trailing `*name`, trailing `*2:name`, and bare `*`. |
 | `storeId` | Non-negative safe integer returned on match. Your framework can map it to handlers or stores. |
 
 Errors:
@@ -362,7 +388,7 @@ Errors:
 | Error class | Code | Trigger |
 |--------|------|---------|
 | `RouteConflictError` | `ERR_ROUTE_CONFLICT` | Duplicate registration for the same method and normalized route shape |
-| `InvalidPathError` | `ERR_INVALID_PATH` | Wildcard route used while `allowWildcard` is `false` |
+| `InvalidPathError` | `ERR_INVALID_PATH` | Invalid route syntax, invalid placement for optional/wildcard segments, or wildcard routing used while `allowWildcard` is `false` |
 | `InvalidMethodError` | `ERR_INVALID_METHOD` | Empty method string |
 | `InvalidStoreIdError` | `ERR_INVALID_STORE_ID` | `storeId` is not a non-negative safe integer |
 
@@ -535,17 +561,24 @@ route-core splits on the raw `/` delimiter before decoding parameter values, so 
 |------|------|---------|
 | Static | `/users/profile` | Exact match |
 | Param | `/users/:id` | `/users/42` -> `{ id: '42' }` |
+| Mixed segment | `/assets/:name.:ext` | `/assets/app.js` -> `{ name: 'app', ext: 'js' }` |
+| Multiple params in one segment | `/near/:lat-:lng` | `/near/12.3-45.6` -> `{ lat: '12.3', lng: '45.6' }` |
+| Segment regex param | `/reports/:id(^\\d+)` | `/reports/123` -> `{ id: '123' }` |
+| Optional param | `/optional/:id?` | `/optional` or `/optional/42` |
+| Fixed multi-segment | `/files/*2:path` | `/files/a/b` -> `{ path: 'a/b' }` |
 | Wildcard | `/assets/*file` | `/assets/js/app.js` -> `{ file: 'js/app.js' }` |
 | Bare wildcard | `*` | Matches any path |
 
-Normalized route shapes are unique. For example, `/users/:id` conflicts with `/users/:name`, and `/assets/*file` conflicts with `/assets/*path`.
+Normalized route shapes are unique. For example, `/users/:id` conflicts with `/users/:name`, `/assets/:name.:ext` conflicts with `/assets/:file.:kind`, and `/assets/*file` conflicts with `/assets/*path`.
+
+Trailing optional params are internally treated as an omitted branch plus a present branch. An explicit static route for the omitted path may coexist and wins when both match.
 
 ### Priority
 
 When multiple patterns can match the same request path, route-core uses this order:
 
 ```text
-static > :param > *wildcard
+static > pattern segment > :param > *wildcard
 ```
 
 ### `ANY` Method
@@ -626,7 +659,7 @@ Why it is not a direct replacement:
 What maps cleanly:
 
 - route registration shape: `method + path`
-- named params and trailing wildcard semantics
+- named params, mixed single-segment params, segment regex params, trailing optional params, trailing wildcard semantics, and fixed-count trailing multi-segment params
 - `ANY` fallback bucket
 - route-template return value for `req.route`
 
@@ -687,10 +720,6 @@ import type {
 const router: Router = createRouter({ caseSensitive: true })
 ```
 
-## Language-Specific Documentation
-
-- [Chinese guide](docs/README.zh-CN.md)
-
 ## Error Reference
 
 ```js
@@ -705,7 +734,7 @@ const {
 | Error class | Code | Trigger |
 |--------|------|---------|
 | `RouteConflictError` | `ERR_ROUTE_CONFLICT` | Duplicate registration for the same method and normalized route shape |
-| `InvalidPathError` | `ERR_INVALID_PATH` | Wildcard route used while `allowWildcard` is `false` |
+| `InvalidPathError` | `ERR_INVALID_PATH` | Invalid route syntax, invalid placement for optional/wildcard segments, or wildcard routing used while `allowWildcard` is `false` |
 | `InvalidMethodError` | `ERR_INVALID_METHOD` | Empty method string |
 | `InvalidStoreIdError` | `ERR_INVALID_STORE_ID` | `storeId` is not a non-negative safe integer |
 
