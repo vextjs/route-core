@@ -4,22 +4,24 @@
 
 它适合“我只想要一个高性能路由匹配核心”的场景，不适合被当成完整 HTTP dispatcher 使用。
 
-包目前公开两层能力：
+这个包有两种使用方式：
 
-- `compat API`：`add`、`find`、`lookup`、`allowed`
-- `hot API`：`prepareMethod`、`preparePathname`、`findPrepared`、`lookupPrepared`、`allowedPrepared`
+- **标准用法**：每次查找时直接传 `method` 和 `path`
+- **高性能接入用法**：把可复用的部分提前准备好，减少每次请求的额外开销
 
-大多数使用者先从 `compat API` 开始即可；只有在适配层热路径已经拿到规范化 pathname 时，才优先使用 `hot API`。
+大多数使用者先从标准用法开始即可。只有当你的适配层已经明确卡在热路径上时，才值得切到高性能接入用法。
 
 ## 目录导航
 
 - [文档定位](#文档定位)
-- [英文 README 与中文文档的联动关系](#英文-readme-与中文文档的联动关系)
 - [安装](#安装)
 - [开始前先判断是否适合](#开始前先判断是否适合)
-- [该选哪套 API](#该选哪套-api)
+- [该选哪种用法](#该选哪种用法)
+- [当前性能对比](#当前性能对比)
 - [快速开始](#快速开始)
-- [Hot Path 快速开始](#hot-path-快速开始)
+- [支持的路由模式](#支持的路由模式)
+- [和 hapi 这类路由器相比少了什么](#和-hapi-这类路由器相比少了什么)
+- [高性能接入快速开始](#高性能接入快速开始)
 - [API 参考](#api-参考)
   - [`createRouter(options?)`](#createrouteroptions)
   - [`RouterOptions`](#routeroptions)
@@ -47,19 +49,12 @@
 
 ## 文档定位
 
-这份文档是 `route-core` 的中文配套说明，面向中文使用者解释同一套公开 API、行为约定和接入方式。默认包入口仍然是项目根目录的英文 README：
+这份文档只回答使用者最关心的问题：
 
-- 英文入口：[../README.md](../README.md)
-- 当前版本说明：[../changelogs/v0.0.2.md](../changelogs/v0.0.2.md)
-
-## 英文 README 与中文文档的联动关系
-
-两者描述的是同一个包和同一套公开契约，不是两套不同文档体系。
-
-- 根 `README.md` 是 npm/GitHub 的默认英文入口，优先提供安装、Quick Start、完整 API 与行为说明。
-- `docs/README.zh-CN.md` 是中文配套入口，覆盖同样的公开 API、语义、限制条件和接入建议。
-- 如果两边示例措辞存在细微差异，以源码实现和已发布包行为为准。
-- 当英文 README 更新公开 API 或用户接入方式时，中文文档必须同步更新，避免长期漂移。
+- 这个包适不适合你
+- 先怎么接
+- 什么时候该用更激进的高性能接法
+- 在真实框架或适配器里边界在哪里
 
 ## 安装
 
@@ -82,21 +77,53 @@ npm install route-core
 - 你希望包内自带 middleware 编排或响应辅助
 - 你希望无改造替换一个把 handler、defaultRoute 都挂在 router 上的库
 
-## 该选哪套 API
+## 该选哪种用法
 
-优先选 **compat API**，如果：
+优先选 **标准用法**，如果：
 
 - 你现在拿到的还是原始 method 和原始 path
 - 你更在意接入清晰度，而不是把适配层常数项压到最薄
 - 你想先完成集成，再决定要不要走热路径
 
-优先选 **hot API**，如果：
+优先选 **高性能接入用法**，如果：
 
 - 你是在适配层内部热路径里调用 router
 - 同一个 method 会被大量重复 lookup
 - 你已经有规范化 pathname，或者愿意每请求只规范化一次
 
-两套 API 的匹配语义完全一致，区别只在于 hot API 去掉了可以预先完成的 facade 成本。
+两种用法的匹配结果完全一致。高性能接入用法只是把一些重复预处理提前做掉。
+
+## 当前性能对比
+
+先看结论：
+
+- 你要的是最简单接入，优先选**标准用法**。
+- 你选 `route-core` 的主要原因就是性能，优先选**高性能接入用法**。
+- 当前版本真正稳定、明显超过 `find-my-way` 的，是高性能接入用法。
+
+下面这组数据来自当前仓库在 `2026-05-29` 的本地实测，命令分别是 `npm run bench:compat` 和 `npm run bench:hot`：
+
+| 场景 | 这代表什么 | `find-my-way` | route-core 标准用法 | route-core 高性能接入用法 |
+|------|------|------|------|------|
+| static | 精确静态路径，例如 `/users` | 约 `5.4M` 到 `5.9M 次/秒` | 约 `5.8M` 到 `6.0M 次/秒` | 约 `7.4M` 到 `7.5M 次/秒` |
+| params | 参数路径，例如 `/users/:id` | 约 `2.5M` 到 `3.1M 次/秒` | 约 `3.0M` 到 `3.2M 次/秒` | 约 `3.9M` 到 `4.2M 次/秒` |
+| wildcard | 尾部通配符路径，例如 `/assets/*file` | 约 `3.2M` 到 `3.4M 次/秒` | 约 `2.8M` 到 `2.9M 次/秒` | 约 `4.7M` 到 `4.9M 次/秒` |
+| miss | 根本没命中任何路由的查找 | 约 `5.7M` 到 `6.7M 次/秒` | 约 `6.3M` 到 `6.5M 次/秒` | 约 `12.4M` 到 `12.5M 次/秒` |
+
+怎么理解这张表：
+
+- 标准用法更适合先接进去，但不是“所有场景都大幅领先”的模式。
+- 高性能接入用法才是性能优先模式；如果你是因为速度选它，应该重点看这一列。
+- wildcard 场景就是一个很直观的例子：高性能接入用法明显强于标准用法，也明显强于 `find-my-way`。
+
+你也可以在自己的机器上直接复核：
+
+```bash
+npm run bench:compat
+npm run bench:hot
+```
+
+这组数字应当看成“当前版本在当前环境下的快照”，不是脱离机器、Node 版本和路由结构的绝对承诺。
 
 ## 快速开始
 
@@ -149,7 +176,114 @@ router.lookup('GET', '/users/42', (storeId, params, routePath) => {
 - 你的框架负责把 `storeId` 回查成真正的 handler 或 middleware 链
 - 命中时会把 `routePath` 一并返回，不需要你额外再查路由模板
 
-## Hot Path 快速开始
+## 支持的路由模式
+
+当前支持的路由形态有：
+
+- 精确静态路由，例如 `/users`
+- 命名参数路由，例如 `/users/:id`
+- 尾部通配符路由，例如 `/assets/*file`
+- 裸通配符 `*`
+- 作为 method 兜底的 `ANY`
+
+当前限制：
+
+- 通配符只能出现在最后一段
+- 路径必须以 `/` 开头，除非整条路由就是裸通配符 `*`
+- 不能有空路径段，例如 `/users//profile`
+- 归一化后的路由形态必须唯一，所以 `/users/:id` 会和 `/users/:name` 冲突
+- 当前不支持可选段、正则参数、位于路径中间的通配符
+
+完整示例：
+
+```js
+const { createRouter } = require('route-core')
+
+const router = createRouter()
+
+router.add('GET', '/users', 0)
+router.add('GET', '/users/:id', 1)
+router.add('GET', '/assets/*file', 2)
+router.add('ANY', '/health', 3)
+router.add('GET', '*', 4)
+
+console.log(router.find('GET', '/users'))
+// { storeId: 0, params: null, routePath: '/users' }
+
+console.log(router.find('GET', '/users/42'))
+// { storeId: 1, params: { id: '42' }, routePath: '/users/:id' }
+
+console.log(router.find('GET', '/assets/js/app.js'))
+// { storeId: 2, params: { file: 'js/app.js' }, routePath: '/assets/*file' }
+
+console.log(router.find('POST', '/health'))
+// { storeId: 3, params: null, routePath: '/health' }
+
+console.log(router.find('GET', '/anything-else'))
+// { storeId: 4, params: null, routePath: '*' }
+```
+
+不支持的写法示例：
+
+```js
+router.add('GET', 'users', 0)              // 非法：必须以 / 开头
+router.add('GET', '/users/*file/edit', 1)  // 非法：通配符必须在最后
+router.add('GET', '/users/:id?', 2)        // 非法：不支持可选参数
+router.add('GET', '/users/:id(\\d+)', 3)   // 非法：不支持正则参数
+```
+
+优先级规则：
+
+- 静态路由优先于参数路由
+- 参数路由优先于通配符路由
+- 具体 method 优先于 `ANY`
+
+例如：
+
+```js
+const router = createRouter()
+
+router.add('GET', '/users/profile', 0)
+router.add('GET', '/users/:id', 1)
+router.add('GET', '/users/*rest', 2)
+
+console.log(router.find('GET', '/users/profile'))
+// { storeId: 0, params: null, routePath: '/users/profile' }
+
+console.log(router.find('GET', '/users/42'))
+// { storeId: 1, params: { id: '42' }, routePath: '/users/:id' }
+
+console.log(router.find('GET', '/users/a/b'))
+// { storeId: 2, params: { rest: 'a/b' }, routePath: '/users/*rest' }
+```
+
+## 和 hapi 这类路由器相比少了什么
+
+如果把 `route-core` 和 `hapi` 这种完整框架路由器放在一起看，最大区别其实不是“快一点还是慢一点”，而是能力范围。
+
+`route-core` 故意只支持更小的一套路由语法：
+
+- 精确静态路径
+- 每段一个命名参数，例如 `/users/:id`
+- 只在最后一段出现的通配符，例如 `/assets/*file`
+- `ANY` method 兜底
+
+而 `hapi` 这类路由器还支持、但 `route-core` 当前不支持的能力包括：
+
+- 可选参数，例如 `/hello/{user?}`
+- 指定段数的多段参数，例如 `/hello/{user*2}`
+- 单段内混合参数，例如 `/{filename}.jpg`
+- 单段内多个参数，例如 `/{filename}.{ext}`
+- 在路由声明里直接挂 handler、校验、认证和更多框架级配置
+
+对使用者来说可以这样理解：
+
+- 你要的是一个小而明确的匹配内核，准备自己接 handler、middleware、store 和上下文，就选 `route-core`
+- 你要的是更丰富的路由表达能力和更完整的框架级路由能力，就选 `hapi` 这类完整路由器
+
+所以 `route-core` 不是要做成 `hapi` 的语法兼容替身，而是一个能力边界更窄、但更适合热路径集成的路由核心。
+
+## 高性能接入快速开始
 
 如果你的适配层已经拿到了规范化的 `pathname`，更推荐走 prepared hot path：
 
@@ -188,6 +322,11 @@ prepared method handle 会在后续 `add()` 后保持可用。路由表发生变
 2. 每次请求只做一次 `preparePathname()`
 3. 用 `lookupPrepared()` 或 `method.lookup()` 命中路由
 4. 通过 `storeId` 回查自己的 store/handler
+
+如果你想知道这两种用法分别对应哪些 API，名字如下：
+
+- 标准用法：`add`、`find`、`lookup`、`allowed`
+- 高性能接入用法：`prepareMethod`、`preparePathname`、`findPrepared`、`lookupPrepared`、`allowedPrepared`
 
 ## API 参考
 
@@ -583,10 +722,6 @@ const {
 
 MIT
 
-## 何时看哪份文档
+## 何时看变更说明
 
-- 你想快速了解安装、入口示例和默认对外说明：先看英文 [../README.md](../README.md)
-- 你希望用中文了解同一套 API、行为语义和接入方式：看这份中文文档
-- 你要确认当前版本已经归档了什么变更：看 [../changelogs/v0.0.2.md](../changelogs/v0.0.2.md)
-
-如果后续继续补更多中文技术文档，仍应以这份中文指南作为入口索引，并保持与根 README 的双向链接。
+如果你要确认当前版本已经归档了什么变更，直接看 [../changelogs/v0.0.2.md](../changelogs/v0.0.2.md)。

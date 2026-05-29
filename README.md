@@ -10,20 +10,23 @@ Use it when you want a router core that is:
 
 Do not treat it as a complete HTTP dispatcher. It does not parse requests, own response flow, run middleware, or store handlers directly.
 
-The package exposes two user-facing surfaces:
+There are two ways to use it:
 
-- **Compat API**: `add`, `find`, `lookup`, and `allowed`
-- **Hot API**: `prepareMethod`, `preparePathname`, `findPrepared`, `lookupPrepared`, and `allowedPrepared`
+- **Standard usage**: pass `method` and `path` directly on each lookup
+- **High-throughput usage**: prepare reusable handles so your adapter does less work per request
 
-Most users should start with the compat API. Adapter internals that already have a normalized pathname should use the hot API.
+Most users should start with standard usage. Only switch to the high-throughput path when your adapter is already performance-sensitive and you understand where the extra cost is coming from.
 
 ## Contents
 
 - [Install](#install)
 - [Before You Choose It](#before-you-choose-it)
-- [Choose an API Surface](#choose-an-api-surface)
+- [Choose a Usage Style](#choose-a-usage-style)
+- [Current Performance Snapshot](#current-performance-snapshot)
 - [Quick Start](#quick-start)
-- [Hot Path Quick Start](#hot-path-quick-start)
+- [Supported Route Patterns](#supported-route-patterns)
+- [Compared with hapi-style Routers](#compared-with-hapi-style-routers)
+- [High-Throughput Quick Start](#high-throughput-quick-start)
 - [API Reference](#api-reference)
   - [createRouter(options?)](#createrouteroptions)
   - [RouterOptions](#routeroptions)
@@ -70,21 +73,53 @@ It is usually not the right fit when:
 - You expect built-in middleware orchestration or HTTP response helpers
 - You need a drop-in replacement for a library whose public API includes handler registration and default-route callbacks
 
-## Choose an API Surface
+## Choose a Usage Style
 
-Use the **compat API** when:
+Start with **standard usage** when:
 
 - Your integration still receives raw method strings and raw paths
 - Clarity matters more than squeezing out the last bit of adapter overhead
 - You want the simplest migration path
 
-Use the **hot API** when:
+Switch to **high-throughput usage** when:
 
 - You call the router from an internal adapter hot path
 - You can reuse a prepared method handle across many requests
 - You already have a normalized pathname, or can normalize it once and reuse it
 
-The router semantics are the same on both surfaces. The hot API only removes avoidable facade work.
+Both styles return the same routing result. The high-throughput path only exists to remove repeated prep work from very hot adapter code.
+
+## Current Performance Snapshot
+
+Short version first:
+
+- If you want the easiest integration, choose **standard usage**.
+- If you picked `route-core` mainly for speed, choose **high-throughput usage**.
+- The current build only shows a clear, across-the-board performance lead over `find-my-way` on the high-throughput path.
+
+Latest local benchmark run on this project workspace, using `npm run bench:hot` and `npm run bench:compat` on May 29, 2026:
+
+| Scenario | What it means | `find-my-way` | route-core standard usage | route-core high-throughput usage |
+|------|------|------|------|------|
+| static | exact paths such as `/users` | about `5.4M` to `5.9M ops/sec` | about `5.8M` to `6.0M ops/sec` | about `7.4M` to `7.5M ops/sec` |
+| params | named params such as `/users/:id` | about `2.5M` to `3.1M ops/sec` | about `3.0M` to `3.2M ops/sec` | about `3.9M` to `4.2M ops/sec` |
+| wildcard | trailing wildcard routes such as `/assets/*file` | about `3.2M` to `3.4M ops/sec` | about `2.8M` to `2.9M ops/sec` | about `4.7M` to `4.9M ops/sec` |
+| miss | lookups that do not match any route | about `5.7M` to `6.7M ops/sec` | about `6.3M` to `6.5M ops/sec` | about `12.4M` to `12.5M ops/sec` |
+
+How to read this:
+
+- Standard usage is the easier API surface, but it is not the mode where `route-core` always wins by a large margin.
+- High-throughput usage is the performance-first mode. That is the mode to benchmark if speed is your main decision point.
+- Wildcard-heavy workloads are the clearest example where the high-throughput path is meaningfully better than both standard usage and `find-my-way`.
+
+To verify on your own machine:
+
+```bash
+npm run bench:compat
+npm run bench:hot
+```
+
+Treat these numbers as a current snapshot, not a universal promise. Your Node version, CPU, and route mix will change the exact ratios.
 
 ## Quick Start
 
@@ -137,7 +172,114 @@ What this example shows in practice:
 - your framework maps `storeId` back to handlers or middleware chains
 - `routePath` comes back on hit, so you do not need a second route-template lookup
 
-## Hot Path Quick Start
+## Supported Route Patterns
+
+The router currently supports these route shapes:
+
+- exact static routes such as `/users`
+- named params such as `/users/:id`
+- trailing wildcards such as `/assets/*file`
+- bare wildcard `*`
+- `ANY` as a method fallback bucket
+
+Current limits:
+
+- wildcard segments must be the final segment
+- routes must start with `/`, unless the whole route is the bare wildcard `*`
+- empty segments such as `/users//profile` are invalid
+- normalized route shapes must be unique, so `/users/:id` conflicts with `/users/:name`
+- one route does not support optional segments, regex params, or wildcard segments in the middle of the path
+
+Complete example:
+
+```js
+const { createRouter } = require('route-core')
+
+const router = createRouter()
+
+router.add('GET', '/users', 0)
+router.add('GET', '/users/:id', 1)
+router.add('GET', '/assets/*file', 2)
+router.add('ANY', '/health', 3)
+router.add('GET', '*', 4)
+
+console.log(router.find('GET', '/users'))
+// { storeId: 0, params: null, routePath: '/users' }
+
+console.log(router.find('GET', '/users/42'))
+// { storeId: 1, params: { id: '42' }, routePath: '/users/:id' }
+
+console.log(router.find('GET', '/assets/js/app.js'))
+// { storeId: 2, params: { file: 'js/app.js' }, routePath: '/assets/*file' }
+
+console.log(router.find('POST', '/health'))
+// { storeId: 3, params: null, routePath: '/health' }
+
+console.log(router.find('GET', '/anything-else'))
+// { storeId: 4, params: null, routePath: '*' }
+```
+
+Examples of unsupported route shapes:
+
+```js
+router.add('GET', 'users', 0)           // invalid: must start with /
+router.add('GET', '/users/*file/edit', 1) // invalid: wildcard must be final
+router.add('GET', '/users/:id?', 2)     // invalid: optional params are not supported
+router.add('GET', '/users/:id(\\d+)', 3)  // invalid: regex params are not supported
+```
+
+Priority rules:
+
+- static routes win over param routes
+- param routes win over wildcard routes
+- concrete methods win over `ANY`
+
+For example:
+
+```js
+const router = createRouter()
+
+router.add('GET', '/users/profile', 0)
+router.add('GET', '/users/:id', 1)
+router.add('GET', '/users/*rest', 2)
+
+console.log(router.find('GET', '/users/profile'))
+// { storeId: 0, params: null, routePath: '/users/profile' }
+
+console.log(router.find('GET', '/users/42'))
+// { storeId: 1, params: { id: '42' }, routePath: '/users/:id' }
+
+console.log(router.find('GET', '/users/a/b'))
+// { storeId: 2, params: { rest: 'a/b' }, routePath: '/users/*rest' }
+```
+
+## Compared with hapi-style Routers
+
+If you compare `route-core` with a full framework router such as `hapi`, the biggest difference is scope.
+
+`route-core` intentionally supports a smaller route syntax:
+
+- exact static paths
+- one named param per segment, such as `/users/:id`
+- trailing wildcard only, such as `/assets/*file`
+- `ANY` method fallback
+
+What `hapi` supports that `route-core` does not currently support:
+
+- optional params such as `/hello/{user?}`
+- multi-segment params with an explicit count such as `/hello/{user*2}`
+- mixed params inside a segment such as `/{filename}.jpg`
+- multiple params in one segment with separators such as `/{filename}.{ext}`
+- route declarations that attach handler, validation, auth, and framework options in one place
+
+What this means in practice:
+
+- choose `route-core` when you want a small, explicit matching core inside your own framework or adapter
+- choose a framework router like `hapi` when you want a richer route language and a larger built-in route feature set
+
+`route-core` is not trying to be a syntax-compatible clone of `hapi`. It is a narrower routing core with a smaller surface area and a stronger focus on hot-path integration.
+
+## High-Throughput Quick Start
 
 If your adapter already has a normalized `pathname`, prefer the prepared hot path:
 
@@ -176,6 +318,11 @@ For adapter authors, the common pattern is:
 2. Normalize the request pathname once per request
 3. Use `lookupPrepared()` or `method.lookup()` for the thinnest dispatch path
 4. Resolve `storeId` in your own store table
+
+The API names behind these two styles are:
+
+- Standard usage: `add`, `find`, `lookup`, `allowed`
+- High-throughput usage: `prepareMethod`, `preparePathname`, `findPrepared`, `lookupPrepared`, `allowedPrepared`
 
 ## API Reference
 
@@ -543,12 +690,6 @@ const router: Router = createRouter({ caseSensitive: true })
 ## Language-Specific Documentation
 
 - [Chinese guide](docs/README.zh-CN.md)
-
-Documentation linkage:
-
-- This root `README.md` is the default English package entry for npm and GitHub.
-- `docs/README.zh-CN.md` is the Chinese companion guide for the same public API and usage model.
-- When examples or wording diverge, the source code and released package behavior are authoritative; this English README is the primary package-facing entry, and the Chinese guide explains the same surface for Chinese readers.
 
 ## Error Reference
 

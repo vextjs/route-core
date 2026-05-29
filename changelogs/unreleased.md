@@ -12,3 +12,6 @@
 - Added a prepared hot-path API (`prepareMethod`, `preparePathname`, `findPrepared`, `lookupPrepared`, `allowedPrepared`) and a dedicated hot benchmark so adapters can bypass most compat-facade overhead.
 - Made prepared method handles stay live across later `add()` calls, and expanded the Chinese guide to document the same public contract as the English README.
 - Reframed the English and Chinese READMEs around user-facing integration guidance, and documented the exact adapter-boundary tradeoffs for `vext`-style integrations.
+- Added a fresh benchmark snapshot to the English and Chinese READMEs so users can see when standard usage is enough and when the high-throughput path is the better fit.
+- Added complete route-pattern examples to the English and Chinese READMEs so users can see the supported matching modes and priority rules at a glance.
+- Added explicit capability-boundary guidance comparing route-core with richer framework routers such as hapi, including unsupported route syntax users should not assume exists.
