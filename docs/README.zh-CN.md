@@ -1,24 +1,23 @@
 # route-core 中文指南
 
-`route-core` 是一个面向 Node.js 框架适配层的轻量级路由内核。它负责 HTTP method 与路径匹配、命名参数解码、路由模板回传，以及数值 `storeId` 分发；真正的 handler、middleware、上下文和响应流程仍由宿主框架持有。
+`route-core` 是一个给框架作者和适配层维护者使用的路由内核。它负责 HTTP method 与 pathname 匹配，返回解码后的 params 和注册时的路由模板；真正的 handler、middleware、请求上下文和响应流程仍然由你的框架持有。
 
-它适合那些想要一个聚焦路由内核、而不是完整 HTTP dispatcher 的框架适配层。
+它适合“我只想要一个高性能路由匹配核心”的场景，不适合被当成完整 HTTP dispatcher 使用。
 
-当前版本公开两层能力：
+包目前公开两层能力：
 
 - `compat API`：`add`、`find`、`lookup`、`allowed`
 - `hot API`：`prepareMethod`、`preparePathname`、`findPrepared`、`lookupPrepared`、`allowedPrepared`
 
-- **双层公开面**：保留兼容 facade，同时公开更薄的 hot path，方便框架内部吃到更高吞吐。
-- **宿主持有 store**：`route-core` 只管理 `storeId` 和参数；真正的 handler、middleware 和 metadata 由你的框架持有。
-- **模板感知匹配**：命中结果会回传 `routePath`，适合 `req.route` 这类低基数标签。
-- **支持 CJS、ESM 与 TypeScript**：包根同时导出 CommonJS、ES module 和声明文件。
+大多数使用者先从 `compat API` 开始即可；只有在适配层热路径已经拿到规范化 pathname 时，才优先使用 `hot API`。
 
 ## 目录导航
 
 - [文档定位](#文档定位)
 - [英文 README 与中文文档的联动关系](#英文-readme-与中文文档的联动关系)
 - [安装](#安装)
+- [开始前先判断是否适合](#开始前先判断是否适合)
+- [该选哪套 API](#该选哪套-api)
 - [快速开始](#快速开始)
 - [Hot Path 快速开始](#hot-path-快速开始)
 - [API 参考](#api-参考)
@@ -39,6 +38,7 @@
   - [优先级](#优先级)
   - [`ANY` Method](#any-method)
 - [框架集成](#框架集成)
+- [在 vext 类适配器中如何接入](#在-vext-类适配器中如何接入)
 - [TypeScript](#typescript)
 - [错误参考](#错误参考)
 - [变更日志](#变更日志)
@@ -66,6 +66,37 @@
 ```bash
 npm install route-core
 ```
+
+## 开始前先判断是否适合
+
+下面这些场景适合选 `route-core`：
+
+- 你在做框架、适配器、网关或内部平台路由层
+- 你希望 `storeId -> store` 的所有权留在自己框架里
+- 你需要命中后直接拿到 `routePath`，用于 `req.route` 或指标标签
+- 你已经有自己的请求对象，只缺路由匹配能力
+
+下面这些场景通常不适合：
+
+- 你想直接拿一个“注册 handler 就能跑”的完整 Web 路由器
+- 你希望包内自带 middleware 编排或响应辅助
+- 你希望无改造替换一个把 handler、defaultRoute 都挂在 router 上的库
+
+## 该选哪套 API
+
+优先选 **compat API**，如果：
+
+- 你现在拿到的还是原始 method 和原始 path
+- 你更在意接入清晰度，而不是把适配层常数项压到最薄
+- 你想先完成集成，再决定要不要走热路径
+
+优先选 **hot API**，如果：
+
+- 你是在适配层内部热路径里调用 router
+- 同一个 method 会被大量重复 lookup
+- 你已经有规范化 pathname，或者愿意每请求只规范化一次
+
+两套 API 的匹配语义完全一致，区别只在于 hot API 去掉了可以预先完成的 facade 成本。
 
 ## 快速开始
 
@@ -112,6 +143,12 @@ router.lookup('GET', '/users/42', (storeId, params, routePath) => {
 })
 ```
 
+这个例子也说明了 `route-core` 的边界：
+
+- 它只保存数值 `storeId`
+- 你的框架负责把 `storeId` 回查成真正的 handler 或 middleware 链
+- 命中时会把 `routePath` 一并返回，不需要你额外再查路由模板
+
 ## Hot Path 快速开始
 
 如果你的适配层已经拿到了规范化的 `pathname`，更推荐走 prepared hot path：
@@ -144,6 +181,13 @@ if (preparedPath) {
 ```
 
 prepared method handle 会在后续 `add()` 后保持可用。路由表发生变化时，`route-core` 会在下一次 lookup 时把它重新绑定到最新的 compiled runtime。
+
+对适配层作者来说，常见热路径用法是：
+
+1. 在启动期 `prepareMethod()`
+2. 每次请求只做一次 `preparePathname()`
+3. 用 `lookupPrepared()` 或 `method.lookup()` 命中路由
+4. 通过 `storeId` 回查自己的 store/handler
 
 ## API 参考
 
@@ -431,6 +475,68 @@ function resolve(method: string, pathname: string, res: any) {
 1. 把 method 预先变成 prepared method handle
 2. 把原始 URL 预先规范化成 prepared pathname
 3. 命中后通过 `storeId` 回查真正的 handler/middleware/store
+
+这也是它的标准职责边界：
+
+- `route-core` 负责匹配
+- 你的框架负责 handler、middleware、metadata 和 fallback 行为
+- `allowed()` 用来区分 `404` 和 `405`
+
+## 在 vext 类适配器中如何接入
+
+`route-core` 可以替换 `vext` 这类 native adapter 里的“路由匹配核心”，但它**不是**把 `find-my-way` 的 import 名称直接替换掉就完事的那种兼容。
+
+不能直接一行替换的原因：
+
+- `find-my-way` 会把 `handler + store` 直接注册在 router 上
+- `find-my-way` 暴露 `lookup(req, res)` 和 `defaultRoute`
+- `route-core` 只注册 `storeId`，命中结果通过 `find()` 或 `lookup()` 返回
+
+能直接对齐的能力：
+
+- `method + path` 注册模型
+- 命名参数与尾部 wildcard 语义
+- `ANY` 兜底 bucket
+- 命中时返回 `routePath`，可直接用于 `req.route`
+
+适配器自己需要持有的部分：
+
+- `storeId -> store` 表
+- `404 / 405` fallback 分支
+- 请求对象 / 响应对象处理
+- 可选的 prepared method 缓存
+
+最小接入形态可以长这样：
+
+```ts
+import { createRouter } from 'route-core'
+
+const router = createRouter()
+const stores: RouteStore[] = []
+const GET = router.prepareMethod('GET')
+
+function register(method: string, path: string, store: RouteStore) {
+  const storeId = stores.length
+  stores.push(store)
+  router.add(method, path, storeId)
+}
+
+function dispatch(methodHandle: ReturnType<typeof router.prepareMethod>, rawPath: string) {
+  const preparedPath = router.preparePathname(rawPath)
+  if (!preparedPath) return false
+
+  return methodHandle.lookup(preparedPath, (storeId, params, routePath) => {
+    const store = stores[storeId]!
+    store.handle(params ?? {}, routePath)
+  })
+}
+```
+
+当前对 `vext` 的推荐结论是：
+
+- `✅` 可以作为匹配引擎接入
+- `❌` 不应表述成“直接替换现有 adapter API”
+- 真正的迁移边界应该放在 adapter 内部，而不是盲目做包级别替换
 
 ## TypeScript
 

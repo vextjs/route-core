@@ -11,3 +11,4 @@
 - Corrected the `v0.0.2` changelog to match the current `docs/` file tree.
 - Added a prepared hot-path API (`prepareMethod`, `preparePathname`, `findPrepared`, `lookupPrepared`, `allowedPrepared`) and a dedicated hot benchmark so adapters can bypass most compat-facade overhead.
 - Made prepared method handles stay live across later `add()` calls, and expanded the Chinese guide to document the same public contract as the English README.
+- Reframed the English and Chinese READMEs around user-facing integration guidance, and documented the exact adapter-boundary tradeoffs for `vext`-style integrations.

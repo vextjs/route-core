@@ -1,22 +1,27 @@
 # route-core
 
-`route-core` is a small, zero-runtime-dependency routing engine for Node.js frameworks. It maps HTTP methods and paths to numeric `storeId` values, returns decoded route parameters, preserves the registered route template, and leaves handler ownership to the host framework.
+`route-core` is a routing engine for framework authors and adapter maintainers. It matches HTTP methods and pathnames, returns decoded params plus the registered route template, and leaves handler ownership to your framework.
 
-It is designed for framework adapters that want a focused router core instead of a full HTTP dispatcher.
+Use it when you want a router core that is:
 
-Current releases now expose two routing surfaces:
+- Fast on its own hot path
+- Small and zero-runtime-dependency
+- Explicit about framework boundaries: `route-core` matches routes, your framework owns handlers, middleware, and request lifecycle
 
-- **Compat API**: `add`, `find`, `lookup`, and `allowed` for framework-friendly integration.
-- **Hot API**: prepared method and prepared pathname helpers for adapters that want the thinnest possible JS hot path.
+Do not treat it as a complete HTTP dispatcher. It does not parse requests, own response flow, run middleware, or store handlers directly.
 
-- **Dual-surface API**: keep the compatibility facade, but expose a thinner fast path for adapter internals.
-- **Framework-owned stores**: route-core stores ids and params only; your framework owns handlers, middleware, and metadata.
-- **Template-aware matching**: matches include `routePath`, which is useful for low-cardinality values such as `req.route`.
-- **CJS, ESM, and TypeScript support**: the package exports CommonJS, ES module, and declaration entry points.
+The package exposes two user-facing surfaces:
+
+- **Compat API**: `add`, `find`, `lookup`, and `allowed`
+- **Hot API**: `prepareMethod`, `preparePathname`, `findPrepared`, `lookupPrepared`, and `allowedPrepared`
+
+Most users should start with the compat API. Adapter internals that already have a normalized pathname should use the hot API.
 
 ## Contents
 
 - [Install](#install)
+- [Before You Choose It](#before-you-choose-it)
+- [Choose an API Surface](#choose-an-api-surface)
 - [Quick Start](#quick-start)
 - [Hot Path Quick Start](#hot-path-quick-start)
 - [API Reference](#api-reference)
@@ -37,6 +42,7 @@ Current releases now expose two routing surfaces:
   - [Priority](#priority)
   - [ANY Method](#any-method)
 - [Framework Integration](#framework-integration)
+- [Using route-core in a vext-like Adapter](#using-route-core-in-a-vext-like-adapter)
 - [TypeScript](#typescript)
 - [Language-Specific Documentation](#language-specific-documentation)
 - [Error Reference](#error-reference)
@@ -48,6 +54,37 @@ Current releases now expose two routing surfaces:
 ```bash
 npm install route-core
 ```
+
+## Before You Choose It
+
+`route-core` is a good fit when:
+
+- You are building a framework, adapter, gateway, or internal platform router
+- You want `storeId -> store` ownership in your own layer
+- You want `routePath` back for metrics tags such as `req.route`
+- You already have a request object and only need route matching
+
+It is usually not the right fit when:
+
+- You want an off-the-shelf web framework router with handlers attached directly
+- You expect built-in middleware orchestration or HTTP response helpers
+- You need a drop-in replacement for a library whose public API includes handler registration and default-route callbacks
+
+## Choose an API Surface
+
+Use the **compat API** when:
+
+- Your integration still receives raw method strings and raw paths
+- Clarity matters more than squeezing out the last bit of adapter overhead
+- You want the simplest migration path
+
+Use the **hot API** when:
+
+- You call the router from an internal adapter hot path
+- You can reuse a prepared method handle across many requests
+- You already have a normalized pathname, or can normalize it once and reuse it
+
+The router semantics are the same on both surfaces. The hot API only removes avoidable facade work.
 
 ## Quick Start
 
@@ -94,6 +131,12 @@ router.lookup('GET', '/users/42', (storeId, params, routePath) => {
 })
 ```
 
+What this example shows in practice:
+
+- `route-core` only stores numeric `storeId`
+- your framework maps `storeId` back to handlers or middleware chains
+- `routePath` comes back on hit, so you do not need a second route-template lookup
+
 ## Hot Path Quick Start
 
 If your adapter already has a normalized `pathname`, prefer the prepared hot path:
@@ -126,6 +169,13 @@ if (preparedPath) {
 ```
 
 Prepared method handles stay live across later `add()` calls. When the route table changes, route-core rebinds the prepared handle to the latest compiled runtime on the next lookup.
+
+For adapter authors, the common pattern is:
+
+1. Prepare the method once during bootstrap
+2. Normalize the request pathname once per request
+3. Use `lookupPrepared()` or `method.lookup()` for the thinnest dispatch path
+4. Resolve `storeId` in your own store table
 
 ## API Reference
 
@@ -407,6 +457,70 @@ function resolve(method: string, pathname: string, res: any) {
   return null
 }
 ```
+
+That is the intended ownership model:
+
+- `route-core` owns route matching
+- your framework owns handler instances, middleware chains, metadata, and fallback behavior
+- `allowed()` is how you distinguish `404` from `405`
+
+If your framework hot path already parsed the URL, switch the example above to `prepareMethod()` plus `preparePathname()`.
+
+## Using route-core in a vext-like Adapter
+
+`route-core` can replace the routing core used inside a `vext`-style native adapter, but it is **not** a one-line import swap for `find-my-way`.
+
+Why it is not a direct replacement:
+
+- `find-my-way` registers `handler + store` directly on the router
+- `find-my-way` exposes `lookup(req, res)` plus `defaultRoute`
+- `route-core` registers `storeId` only and returns matches through `find()` or `lookup()`
+
+What maps cleanly:
+
+- route registration shape: `method + path`
+- named params and trailing wildcard semantics
+- `ANY` fallback bucket
+- route-template return value for `req.route`
+
+What the adapter must own:
+
+- `storeId -> store` table
+- `404` / `405` fallback branching
+- request-object and response-object handling
+- optional prepared method caching for hot methods
+
+Minimal adapter shape:
+
+```ts
+import { createRouter } from 'route-core'
+
+const router = createRouter()
+const stores: RouteStore[] = []
+const GET = router.prepareMethod('GET')
+
+function register(method: string, path: string, store: RouteStore) {
+  const storeId = stores.length
+  stores.push(store)
+  router.add(method, path, storeId)
+}
+
+function dispatch(methodHandle: ReturnType<typeof router.prepareMethod>, rawPath: string) {
+  const preparedPath = router.preparePathname(rawPath)
+  if (!preparedPath) return false
+
+  return methodHandle.lookup(preparedPath, (storeId, params, routePath) => {
+    const store = stores[storeId]!
+    store.handle(params ?? {}, routePath)
+  })
+}
+```
+
+Current recommendation for `vext`:
+
+- **Yes**, `route-core` is viable as the matching engine
+- **No**, it should not be described as a drop-in replacement for the current adapter contract
+- The migration unit is the adapter boundary, not a blind package swap
 
 ## TypeScript
 
