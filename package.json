@@ -1,6 +1,6 @@
 {
   "name": "route-core",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Minimal, zero-runtime-dependency routing engine for Node.js frameworks.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -38,7 +38,7 @@
   },
   "keywords": [],
   "author": "Rocky",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vextjs/route-core.git"
