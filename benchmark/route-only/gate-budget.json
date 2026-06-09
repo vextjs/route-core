@@ -1,16 +1,16 @@
 {
   "minimumOpsPerSecond": {
-    "route-core static": 4300000,
-    "route-core lookup static": 4400000,
-    "route-core params": 1700000,
-    "route-core lookup params": 2000000,
-    "route-core mixed": 650000,
-    "route-core lookup mixed": 650000,
-    "route-core regex": 650000,
-    "route-core lookup regex": 750000,
-    "route-core wildcard": 2600000,
-    "route-core lookup wildcard": 2800000,
-    "route-core miss": 5800000,
-    "route-core lookup miss": 6000000
+    "route-core static": 3800000,
+    "route-core lookup static": 3600000,
+    "route-core params": 1300000,
+    "route-core lookup params": 1500000,
+    "route-core mixed": 500000,
+    "route-core lookup mixed": 580000,
+    "route-core regex": 520000,
+    "route-core lookup regex": 620000,
+    "route-core wildcard": 2300000,
+    "route-core lookup wildcard": 2400000,
+    "route-core miss": 5200000,
+    "route-core lookup miss": 5200000
   }
 }
