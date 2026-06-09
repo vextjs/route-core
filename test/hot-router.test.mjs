@@ -35,6 +35,31 @@ test('hot prepared method supports direct find and lookup', async (t) => {
   assert.equal(router.lookupPrepared(post, '/rpc', () => {}), true)
 })
 
+test('prepared string pathnames skip raw normalization but keep matches', () => {
+  const router = createRouter()
+  router.add('GET', '/users/:id', 1)
+
+  const get = router.prepareMethod('GET')
+  const prepared = router.preparePathname('/users/abc')
+
+  assert.equal(typeof prepared, 'string')
+  assert.deepEqual(get.find(prepared), {
+    storeId: 1,
+    params: { id: 'abc' },
+    routePath: '/users/:id',
+  })
+
+  let lookupResult = null
+  assert.equal(router.lookupPrepared(get, prepared, (storeId, params, routePath) => {
+    lookupResult = { storeId, params, routePath }
+  }), true)
+  assert.deepEqual(lookupResult, {
+    storeId: 1,
+    params: { id: 'abc' },
+    routePath: '/users/:id',
+  })
+})
+
 test('preparePathname preserves raw params for case-insensitive routers', () => {
   const router = createRouter({ caseSensitive: false })
   router.add('GET', '/users/:id', 1)
@@ -80,6 +105,20 @@ test('prepared APIs normalize raw string pathnames with the standard router rule
   })
 
   assert.deepEqual(router.allowedPrepared('/Health/?from=app#section'), ['GET', 'POST'])
+})
+
+test('case-sensitive prepared APIs only normalize raw strings that require it', () => {
+  const router = createRouter({ caseSensitive: true })
+  router.add('GET', '/Users/:id', 1)
+
+  const get = router.prepareMethod('GET')
+
+  assert.deepEqual(get.find('/Users/AbC?from=app#section'), {
+    storeId: 1,
+    params: { id: 'AbC' },
+    routePath: '/Users/:id',
+  })
+  assert.equal(get.find('/users/AbC'), null)
 })
 
 test('allowedPrepared reuses prepared path input', () => {

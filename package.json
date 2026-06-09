@@ -1,6 +1,6 @@
 {
   "name": "route-core",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Minimal, zero-runtime-dependency routing engine for Node.js frameworks.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -36,18 +36,44 @@
     "bench:compat:built": "node benchmark/route-only/index.mjs",
     "prepublishOnly": "node scripts/prepublish-check.mjs"
   },
-  "keywords": [],
-  "author": "Rocky",
+  "keywords": [
+    "router",
+    "routing",
+    "http-router",
+    "route-matching",
+    "path-matching",
+    "url-router",
+    "node",
+    "nodejs",
+    "typescript",
+    "framework",
+    "adapter",
+    "params",
+    "zero-dependency",
+    "performance",
+    "hot-path",
+    "vext"
+  ],
+  "author": "rocky <rockyshi1993@gmail.com>",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vextjs/route-core.git"
   },
+  "bugs": {
+    "url": "https://github.com/vextjs/route-core/issues"
+  },
+  "homepage": "https://github.com/vextjs/route-core#readme",
   "publishConfig": {
     "access": "public"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false,
   "files": [
     "dist",
+    "changelogs",
     "README.md",
     "LICENSE"
   ],

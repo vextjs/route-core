@@ -37,8 +37,13 @@ type PreparedMethodBinding = {
 }
 
 type PreparedPathnameResolver = (path: string) => PreparedPathname | null
+type PreparedPathnameFastPathState = {
+  hasEntries: boolean
+  strings: ReadonlySet<string>
+}
 
 const PREPARED_METHOD_OWNER = Symbol("route-core.prepared-method-owner")
+const PREPARED_PATHNAME_STRING_CACHE_LIMIT = 8192
 
 type OwnedPreparedMethod = PreparedMethod & {
   readonly [PREPARED_METHOD_OWNER]: object
@@ -48,6 +53,7 @@ class PreparedMethodHandle implements OwnedPreparedMethod {
   readonly name: string
   readonly [PREPARED_METHOD_OWNER]: object
   private readonly resolvePathnameInput: PreparedPathnameResolver
+  private readonly pathnameFastPathState: PreparedPathnameFastPathState
   private readonly readBinding: (currentVersion: number) => PreparedMethodBinding | null
   private specificRuntime: CompiledMethodRuntime | null = null
   private anyRuntime: CompiledMethodRuntime | null = null
@@ -58,17 +64,19 @@ class PreparedMethodHandle implements OwnedPreparedMethod {
     name: string,
     ownerToken: object,
     resolvePathnameInput: PreparedPathnameResolver,
+    pathnameFastPathState: PreparedPathnameFastPathState,
     readBinding: (currentVersion: number) => PreparedMethodBinding | null,
   ) {
     this.name = name
     this[PREPARED_METHOD_OWNER] = ownerToken
     this.resolvePathnameInput = resolvePathnameInput
+    this.pathnameFastPathState = pathnameFastPathState
     this.readBinding = readBinding
     this.anyMethod = name === ANY_METHOD
   }
 
   find(pathname: PreparedPathname): MatchResult | null {
-    const resolvedPathname = resolvePreparedPathname(pathname, this.resolvePathnameInput)
+    const resolvedPathname = this.resolvePathname(pathname)
     if (!resolvedPathname) {
       return null
     }
@@ -89,7 +97,7 @@ class PreparedMethodHandle implements OwnedPreparedMethod {
       throw new TypeError("onMatch must be a function")
     }
 
-    const resolvedPathname = resolvePreparedPathname(pathname, this.resolvePathnameInput)
+    const resolvedPathname = this.resolvePathname(pathname)
     if (!resolvedPathname) {
       return false
     }
@@ -118,6 +126,21 @@ class PreparedMethodHandle implements OwnedPreparedMethod {
     this.specificRuntime = nextBinding.specificRuntime
     this.anyRuntime = nextBinding.anyRuntime
   }
+
+  private resolvePathname(pathname: PreparedPathname): {
+    rawPathname: string
+    matchPathname: string
+  } | null {
+    if (!this.pathnameFastPathState.hasEntries) {
+      return resolvePreparedPathname(pathname, this.resolvePathnameInput)
+    }
+
+    return resolvePreparedPathname(
+      pathname,
+      this.resolvePathnameInput,
+      this.pathnameFastPathState.strings,
+    )
+  }
 }
 
 export class RouteCoreRouter implements Router {
@@ -125,6 +148,11 @@ export class RouteCoreRouter implements Router {
   private readonly options: Required<RouterOptions>
   private readonly routes: RouteDefinition[] = []
   private readonly preparedMethodOwner = {}
+  private readonly preparedPathnameStrings = new Set<string>()
+  private readonly preparedPathnameFastPathState: PreparedPathnameFastPathState = {
+    hasEntries: false,
+    strings: this.preparedPathnameStrings,
+  }
   private compiledRuntime: CompiledRouterRuntime | null = null
   private runtimeVersion = 0
   private dirty = true
@@ -162,7 +190,7 @@ export class RouteCoreRouter implements Router {
 
   find(method: string, path: string): MatchResult | null {
     const normalizedMethod = normalizeMethod(method)
-    const preparedPath = this.preparePathname(path)
+    const preparedPath = this.preparePathnameInput(path)
     if (!preparedPath) {
       return null
     }
@@ -176,7 +204,7 @@ export class RouteCoreRouter implements Router {
     }
 
     const normalizedMethod = normalizeMethod(method)
-    const preparedPath = this.preparePathname(path)
+    const preparedPath = this.preparePathnameInput(path)
     if (!preparedPath) {
       return false
     }
@@ -185,7 +213,7 @@ export class RouteCoreRouter implements Router {
   }
 
   allowed(path: string): string[] | null {
-    const preparedPath = this.preparePathname(path)
+    const preparedPath = this.preparePathnameInput(path)
     if (!preparedPath) {
       return null
     }
@@ -198,13 +226,18 @@ export class RouteCoreRouter implements Router {
     return new PreparedMethodHandle(
       normalizedMethod,
       this.preparedMethodOwner,
-      (path) => this.preparePathname(path),
+      (path) => this.preparePathnameInput(path),
+      this.preparedPathnameFastPathState,
       (currentVersion) => this.readPreparedMethodBinding(normalizedMethod, currentVersion),
     )
   }
 
   preparePathname(path: string): PreparedPathname | null {
-    return prepareLookupPath(path, this.options)
+    const preparedPathname = this.preparePathnameInput(path)
+    if (typeof preparedPathname === "string") {
+      this.rememberPreparedPathnameString(preparedPathname)
+    }
+    return preparedPathname
   }
 
   findPrepared(method: PreparedMethod, pathname: PreparedPathname): MatchResult | null {
@@ -222,7 +255,11 @@ export class RouteCoreRouter implements Router {
   }
 
   allowedPrepared(pathname: PreparedPathname): string[] | null {
-    const normalizedPathname = normalizePreparedPathnameInput(pathname, (path) => this.preparePathname(path))
+    const normalizedPathname = normalizePreparedPathnameInput(
+      pathname,
+      (path) => this.preparePathnameInput(path),
+      this.preparedPathnameFastPathState.hasEntries ? this.preparedPathnameStrings : undefined,
+    )
     if (!normalizedPathname) {
       return null
     }
@@ -269,6 +306,10 @@ export class RouteCoreRouter implements Router {
       specificRuntime: runtime.methods.get(normalizedMethod) ?? null,
       anyRuntime: runtime.anyMethod,
     }
+  }
+
+  private preparePathnameInput(path: string): PreparedPathname | null {
+    return prepareLookupPath(path, this.options)
   }
 
   private findByNormalizedMethod(
@@ -318,6 +359,19 @@ export class RouteCoreRouter implements Router {
       throw new TypeError("Prepared method handle must come from the same router instance")
     }
   }
+
+  private rememberPreparedPathnameString(pathname: string): void {
+    if (this.preparedPathnameStrings.has(pathname)) {
+      return
+    }
+
+    if (this.preparedPathnameStrings.size >= PREPARED_PATHNAME_STRING_CACHE_LIMIT) {
+      this.preparedPathnameStrings.clear()
+    }
+
+    this.preparedPathnameStrings.add(pathname)
+    this.preparedPathnameFastPathState.hasEntries = true
+  }
 }
 
 function resolvePreparedPathname(pathname: PreparedPathname): {
@@ -333,23 +387,33 @@ function resolvePreparedPathname(
 }
 function resolvePreparedPathname(
   pathname: PreparedPathname,
+  resolvePathnameInput: PreparedPathnameResolver,
+  preparedPathnameStrings: ReadonlySet<string>,
+): {
+  rawPathname: string
+  matchPathname: string
+}
+function resolvePreparedPathname(
+  pathname: PreparedPathname,
   resolvePathnameInput?: PreparedPathnameResolver,
+  preparedPathnameStrings?: ReadonlySet<string>,
 ): {
   rawPathname: string
   matchPathname: string
 } | null {
-  return normalizePreparedPathnameInput(pathname, resolvePathnameInput)
+  return normalizePreparedPathnameInput(pathname, resolvePathnameInput, preparedPathnameStrings)
 }
 
 function normalizePreparedPathnameInput(
   pathname: PreparedPathname,
   resolvePathnameInput?: PreparedPathnameResolver,
+  preparedPathnameStrings?: ReadonlySet<string>,
 ): {
   rawPathname: string
   matchPathname: string
 } | null {
   if (typeof pathname === "string") {
-    if (!resolvePathnameInput) {
+    if (!resolvePathnameInput || preparedPathnameStrings?.has(pathname)) {
       return {
         rawPathname: pathname,
         matchPathname: pathname,

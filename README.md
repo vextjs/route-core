@@ -336,6 +336,8 @@ if (preparedPath) {
 }
 ```
 
+In `v0.0.7` and later, strings returned by `preparePathname()` are recognized by the same router instance as already prepared. That lets prepared method dispatch avoid repeating raw pathname normalization, while direct raw string calls still keep the compatibility behavior.
+
 Prepared method handles stay live across later `add()` calls. When the route table changes, route-core rebinds the prepared handle to the latest compiled runtime on the next lookup.
 
 For adapter authors, the common pattern is:
@@ -745,6 +747,9 @@ const {
 
 ## Changelog
 
+- [v0.0.7](changelogs/v0.0.7.md)
+- [v0.0.6](changelogs/v0.0.6.md)
+- [v0.0.5](changelogs/v0.0.5.md)
 - [v0.0.4](changelogs/v0.0.4.md)
 - [v0.0.3](changelogs/v0.0.3.md)
 - [v0.0.2](changelogs/v0.0.2.md)
