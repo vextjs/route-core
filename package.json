@@ -58,12 +58,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vextjs/route-core.git"
+    "url": "git+https://github.com/devcodex-labs/route-core.git"
   },
   "bugs": {
-    "url": "https://github.com/vextjs/route-core/issues"
+    "url": "https://github.com/devcodex-labs/route-core/issues"
   },
-  "homepage": "https://github.com/vextjs/route-core#readme",
+  "homepage": "https://github.com/devcodex-labs/route-core#readme",
   "publishConfig": {
     "access": "public"
   },
